@@ -4,9 +4,9 @@
 - `custom_components/frigate_feed/`: Home Assistant custom integration backend.
   - `__init__.py`: setup/unload, WebSocket commands, card static path + Lovelace resource.
   - `frigate_source.py`: read-only adapter over the official Frigate integration (`hass.data["frigate"]`).
-  - `feed.py`: Frigate event -> feed item mapping, list cache, hidden items.
-  - `media.py`: authenticated snapshot/clip proxy + URL signing.
-  - `mqtt_listener.py`: `frigate/events` -> debounced live-update signal.
+  - `feed.py`: Frigate review item (+ its events) -> feed item mapping, list cache, hidden items.
+  - `media.py`: authenticated snapshot/review clip/thumbnail proxy + URL signing.
+  - `mqtt_listener.py`: `frigate/reviews` -> debounced live-update signal.
   - `models.py`, `storage.py`, `const.py`: data model, persistence, constants.
   - `frontend/frigate-feed-card.js`: bundled Lovelace card served by the integration.
   - `manifest.json`, `strings.json`, `translations/`, `config_flow.py`: HA integration metadata/UI.
@@ -20,7 +20,7 @@
   `python3 -m venv ~/.cache/frigate-feed-venv && ~/.cache/frigate-feed-venv/bin/pip install -r requirements_test.txt`).
 - `docker compose -p frigate-feed-dev up -d`: start the dev stack (HA on http://localhost:8124).
 - `docker compose -p frigate-feed-dev restart homeassistant`: reload after backend code changes.
-- `./scripts/bump-card-resource-version.sh`: bump the Lovelace resource `?v=` after card changes.
+- `HA_TOKEN=<token> ./scripts/bump-card-resource-version.sh`: bump the Lovelace resource `?v=` after card changes.
 
 ## Safety
 - This machine also runs production containers (`home-assistant` on :8123, `frigate`, `mosquitto` on :1883).

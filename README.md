@@ -1,7 +1,7 @@
 # Frigate Feed
 
 Home Assistant custom integration + bundled Lovelace card with a chronological detection
-timeline sourced from [Frigate](https://frigate.video) events.
+timeline sourced from [Frigate](https://frigate.video) review items (alerts and detections).
 
 ## Project Goal
 
@@ -9,10 +9,12 @@ Ship the same card experience as [reolink-feed](https://github.com/jefvlamings/r
 (card layout, timeline clustering, info dialog, prev/next navigation, download/share,
 history/logbook links, i18n, editor), but powered by Frigate:
 
-- one Frigate **event** (tracked object) = one feed item
+- one Frigate **review item** = one feed item: every object detected together on a camera
+  (e.g. a person walking a dog past a car) shares one item and one recording, exactly like
+  Frigate's own Review page; the dialog has a chip per detection that jumps to it in the clip
 - Frigate labels bucketed into `person`, `pet` (dog, cat, bird, ...) and `vehicle` (car, truck, bicycle, ...)
 - snapshot and clip for every item, proxied from Frigate through Home Assistant (no local copies)
-- live refresh when Frigate publishes `frigate/events` over MQTT
+- live refresh when Frigate publishes `frigate/reviews` over MQTT
 - "delete" only hides an item in the feed; Frigate is never modified
 
 Architecture and decisions are documented in [`PLANS.md`](PLANS.md).
@@ -75,9 +77,19 @@ The card is also available in the card picker and has a visual editor.
 | `frigate_feed/subscribe` | none | subscription; emits an event whenever the feed changes (MQTT driven, debounced) |
 
 Items keep the reolink-feed shape (`id`, `start_ts`, `end_ts`, `duration_s`, `label`,
-`source_entity_id`, `camera_name`, `snapshot_url`, `recording`) plus a `frigate` object with the
-raw event id, label, sub label, score and zones. `snapshot_url` and `recording.local_url` are
-signed Home Assistant paths to the media proxy `/api/frigate_feed/media/{event_id}/{snapshot.jpg|clip.mp4}`.
+`source_entity_id`, `camera_name`, `snapshot_url`, `recording`) plus:
+
+- `id`: the Frigate review item id; `label`: the main label (person, then vehicle, then pet)
+- `labels`: every enabled label in the review item
+- `detections`: its Frigate events (`event_id`, `label`, `frigate_label`, `sub_label`, `score`,
+  `start_offset_s` into the clip, `duration_s`, `has_snapshot`), oldest first
+- `frigate`: review id, best event id, severity, camera, objects, sub labels and zones
+
+`snapshot_url` and `recording.local_url` are signed Home Assistant paths to the media proxy:
+`/api/frigate_feed/media/{event_id}/snapshot.jpg` (best detection) or
+`/api/frigate_feed/media/review/{review_id}/thumb.webp` (fallback), and
+`/api/frigate_feed/media/review/{review_id}/clip.mp4`: the camera recording over the review
+window plus the camera's pre/post capture.
 
 ## Development
 
@@ -126,11 +138,11 @@ Useful commands:
 ```bash
 # Reload after backend changes
 docker compose -p frigate-feed-dev restart homeassistant
-# Bump the Lovelace resource ?v= after card changes
-./scripts/bump-card-resource-version.sh
+# Bust the browser cache after card changes (bumps the Lovelace resource ?v=, no restart)
+HA_TOKEN=<long-lived token> ./scripts/bump-card-resource-version.sh
 # Inspect Frigate
 docker compose -p frigate-feed-dev exec frigate-dev curl -s localhost:5000/api/version
-docker compose -p frigate-feed-dev exec frigate-dev curl -s 'localhost:5000/api/events?limit=5'
+docker compose -p frigate-feed-dev exec frigate-dev curl -s 'localhost:5000/api/review?limit=5'
 # Tear down and remove Frigate dev data (files are root-owned, so delete from a container)
 docker compose -p frigate-feed-dev down -v
 docker run --rm -v "$PWD/dev/frigate:/d" --entrypoint /bin/rm eclipse-mosquitto:2 -rf /d/storage

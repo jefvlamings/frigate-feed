@@ -1,0 +1,135 @@
+[
+  {
+    "id": "1793016151.200000-rev001",
+    "camera": "front_door",
+    "start_time": 1793016151.2,
+    "end_time": null,
+    "severity": "alert",
+    "thumb_path": "/media/frigate/clips/review/thumb-front_door-1793016151.200000-rev001.webp",
+    "data": {
+      "detections": ["1793016151.051489-lzerqk"],
+      "objects": ["person"],
+      "verified_objects": [],
+      "sub_labels": [],
+      "zones": ["driveway"],
+      "audio": [],
+      "thumb_time": 1793016152.0,
+      "metadata": null
+    },
+    "has_been_reviewed": false
+  },
+  {
+    "id": "1793015453.600000-rev002",
+    "camera": "front_door",
+    "start_time": 1793015453.6,
+    "end_time": 1793015458.1,
+    "severity": "alert",
+    "thumb_path": "/media/frigate/clips/review/thumb-front_door-1793015453.600000-rev002.webp",
+    "data": {
+      "detections": ["1793015453.52062-q2c2mg"],
+      "objects": ["person"],
+      "verified_objects": [],
+      "sub_labels": [],
+      "zones": ["driveway"],
+      "audio": [],
+      "thumb_time": 1793015454.0,
+      "metadata": null
+    },
+    "has_been_reviewed": false
+  },
+  {
+    "id": "1793014800.300000-rev003",
+    "camera": "garden_shed",
+    "start_time": 1793014800.3,
+    "end_time": 1793014812.75,
+    "severity": "detection",
+    "thumb_path": "/media/frigate/clips/review/thumb-garden_shed-1793014800.300000-rev003.webp",
+    "data": {
+      "detections": ["1793014800.250000-b1rd01"],
+      "objects": ["bird"],
+      "verified_objects": [],
+      "sub_labels": [],
+      "zones": [],
+      "audio": [],
+      "thumb_time": 1793014801.0,
+      "metadata": null
+    },
+    "has_been_reviewed": false
+  },
+  {
+    "id": "1793012000.600000-rev004",
+    "camera": "garden_shed",
+    "start_time": 1793012000.6,
+    "end_time": 1793013030.6,
+    "severity": "detection",
+    "thumb_path": "/media/frigate/clips/review/thumb-garden_shed-1793012000.600000-rev004.webp",
+    "data": {
+      "detections": ["1793012000.500000-pkg001", "1793013000.100000-car001"],
+      "objects": ["package", "car"],
+      "verified_objects": [],
+      "sub_labels": [],
+      "zones": [],
+      "audio": [],
+      "thumb_time": 1793013001.0,
+      "metadata": null
+    },
+    "has_been_reviewed": false
+  },
+  {
+    "id": "1793011000.000000-rev005",
+    "camera": "garden_shed",
+    "start_time": 1793011000.0,
+    "end_time": 1793011010.0,
+    "severity": "detection",
+    "thumb_path": "/media/frigate/clips/review/thumb-garden_shed-1793011000.000000-rev005.webp",
+    "data": {
+      "detections": [],
+      "objects": ["package"],
+      "verified_objects": [],
+      "sub_labels": [],
+      "zones": [],
+      "audio": [],
+      "thumb_time": 1793011001.0,
+      "metadata": null
+    },
+    "has_been_reviewed": false
+  },
+  {
+    "id": "1793010001.000000-rev006",
+    "camera": "front_door",
+    "start_time": 1793010001.0,
+    "end_time": 1793010021.4,
+    "severity": "alert",
+    "thumb_path": "/media/frigate/clips/review/thumb-front_door-1793010001.000000-rev006.webp",
+    "data": {
+      "detections": ["1793010000.900000-dog001"],
+      "objects": ["dog"],
+      "verified_objects": [],
+      "sub_labels": ["Rex"],
+      "zones": [],
+      "audio": [],
+      "thumb_time": 1793010002.0,
+      "metadata": null
+    },
+    "has_been_reviewed": true
+  },
+  {
+    "id": "1792900000.100000-rev007",
+    "camera": "front_door",
+    "start_time": 1792900000.1,
+    "end_time": 1792900010.0,
+    "severity": "alert",
+    "thumb_path": "/media/frigate/clips/review/thumb-front_door-1792900000.100000-rev007.webp",
+    "data": {
+      "detections": ["1792900000.000000-old001"],
+      "objects": ["person"],
+      "verified_objects": [],
+      "sub_labels": [],
+      "zones": [],
+      "audio": [],
+      "thumb_time": 1792900001.0,
+      "metadata": null
+    },
+    "has_been_reviewed": false
+  }
+]

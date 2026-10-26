@@ -325,3 +325,40 @@ async def test_async_get_event_failures(hass: HomeAssistant, fake_frigate: FakeF
     assert await source.async_get_event("x") is None
     hass.data["frigate"].pop(FRIGATE_ENTRY_ID)
     assert await source.async_get_event("x") is None
+
+
+async def test_async_get_reviews(hass: HomeAssistant, fake_frigate: FakeFrigate) -> None:
+    source = async_get_frigate_source(hass, fake_frigate.entry.entry_id)
+    reviews = await source.async_get_reviews(after=0, limit=3, labels=["person"])
+    assert [review["data"]["objects"] for review in reviews] == [["person"]] * 3
+    starts = [review["start_time"] for review in reviews]
+    assert starts == sorted(starts, reverse=True)
+    name, args = fake_frigate.client.calls[-1]
+    assert name == "async_get_reviews"
+    assert args["limit"] == 3 and args["after"] == 0
+
+    fake_frigate.client.fail = True
+    with pytest.raises(FrigateNotReady):
+        await source.async_get_reviews(after=0, limit=3, labels=None)
+
+
+async def test_async_get_review(hass: HomeAssistant, fake_frigate: FakeFrigate) -> None:
+    source = async_get_frigate_source(hass, fake_frigate.entry.entry_id)
+    review_id = fake_frigate.reviews[1]["id"]
+    review = await source.async_get_review(review_id)
+    assert review is not None and review["id"] == review_id
+    assert fake_frigate.client.calls[-1] == (
+        "api_wrapper",
+        {"method": "get", "url": f"http://frigate.test:5000/api/review/{review_id}"},
+    )
+    assert await source.async_get_review("1.0-missing") is None
+    fake_frigate.client.fail = True
+    assert await source.async_get_review(review_id) is None
+
+
+async def test_recording_enabled(hass: HomeAssistant, fake_frigate: FakeFrigate) -> None:
+    source = async_get_frigate_source(hass, fake_frigate.entry.entry_id)
+    assert source.recording_enabled("front_door")
+    assert source.recording_enabled("unknown_camera")
+    fake_frigate.config["cameras"]["front_door"]["record"]["enabled"] = False
+    assert not source.recording_enabled("front_door")

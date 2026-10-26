@@ -193,6 +193,43 @@ class FrigateSource:
         result.sort(key=_event_start_time, reverse=True)
         return result
 
+    async def async_get_reviews(
+        self, *, after: float, limit: int, labels: list[str] | None
+    ) -> list[dict[str, Any]]:
+        """Return Frigate review items (newest first) started after `after` (epoch seconds).
+
+        Raises FrigateNotReady on client errors.
+        """
+        client = self.client
+        try:
+            reviews = await client.async_get_reviews(after=int(after), limit=limit, labels=labels)
+        except Exception as err:  # noqa: BLE001 - client raises its own error types
+            raise FrigateNotReady(f"Failed to fetch Frigate review items: {err}") from err
+        if not isinstance(reviews, list):
+            return []
+        result = [review for review in reviews if isinstance(review, dict)]
+        result.sort(key=_event_start_time, reverse=True)
+        return result
+
+    async def async_get_review(self, review_id: str) -> dict[str, Any] | None:
+        """Return one Frigate review item, or None when it does not exist or the call fails.
+
+        The client has no single-review helper (and `async_get_path` appends a slash that
+        Frigate redirects), so this calls GET /api/review/{id} through `api_wrapper`.
+        """
+        try:
+            review = await self.client.api_wrapper("get", f"{self.base_url}/api/review/{review_id}")
+        except Exception:  # noqa: BLE001 - not found and transport errors look alike
+            _LOGGER.debug("Failed to fetch Frigate review item %s", review_id, exc_info=True)
+            return None
+        return review if isinstance(review, dict) and review.get("id") == review_id else None
+
+    def recording_enabled(self, camera: str) -> bool:
+        """True unless cameras[camera].record.enabled is explicitly false."""
+        cameras = _as_dict(self.config.get("cameras"))
+        record = _as_dict(_as_dict(cameras.get(camera)).get("record"))
+        return record.get("enabled") is not False
+
     async def async_get_event(self, event_id: str) -> dict[str, Any] | None:
         """Return one Frigate event, or None when it does not exist or the call fails."""
         try:

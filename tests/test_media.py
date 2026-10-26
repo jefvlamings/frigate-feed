@@ -33,6 +33,21 @@ CLIP_PATH = f"/api/frigate_feed/media/{EVENT_ID}/clip.mp4"
 UPSTREAM_SNAPSHOT = f"{BASE_URL}/api/events/{EVENT_ID}/snapshot.jpg"
 UPSTREAM_CLIP = f"{BASE_URL}/api/events/{EVENT_ID}/clip.mp4"
 CLIP_BYTES = bytes(range(256)) * 4
+REVIEW_ID = "1793016150.900000-rev001"
+REVIEW = {
+    "id": REVIEW_ID,
+    "camera": "front_door",
+    "start_time": 1793016150.9,
+    "end_time": 1793016170.2,
+    "severity": "alert",
+    "thumb_path": f"/media/frigate/clips/review/thumb-front_door-{REVIEW_ID}.webp",
+    "data": {"detections": [EVENT_ID], "objects": ["person"]},
+}
+REVIEW_CLIP_PATH = f"/api/frigate_feed/media/review/{REVIEW_ID}/clip.mp4"
+REVIEW_THUMB_PATH = f"/api/frigate_feed/media/review/{REVIEW_ID}/thumb.webp"
+# start 150.9 - pre_capture 5 -> floor 145; end 170.2 + post_capture 8 -> ceil 179
+UPSTREAM_REVIEW_CLIP = f"{BASE_URL}/api/front_door/start/1793016145/end/1793016179/clip.mp4"
+UPSTREAM_REVIEW_THUMB = f"{BASE_URL}/clips/review/thumb-front_door-{REVIEW_ID}.webp"
 
 
 class FakeSource:
@@ -41,9 +56,21 @@ class FakeSource:
     def __init__(self, base_url: str = BASE_URL, verify_ssl: bool = True) -> None:
         self.base_url = base_url
         self.verify_ssl = verify_ssl
+        self.reviews: dict[str, dict[str, Any]] = {REVIEW_ID: dict(REVIEW)}
+        self.review_lookups = 0
 
     def auth_headers(self) -> dict[str, str]:
         return {"Authorization": "Bearer frigate-token"}
+
+    def pre_capture_seconds(self, camera: str, severity: str | None = None) -> float:
+        return 5.0
+
+    def post_capture_seconds(self, camera: str, severity: str | None = None) -> float:
+        return 8.0
+
+    async def async_get_review(self, review_id: str) -> dict[str, Any] | None:
+        self.review_lookups += 1
+        return self.reviews.get(review_id)
 
 
 class SourceHolder:
@@ -395,3 +422,85 @@ async def test_cached_clip_purged_after_ttl(
         async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=media.CLIP_CACHE_TTL_SECONDS + 5))
         await hass.async_block_till_done()
     assert not cache._items
+
+
+async def test_review_clip_proxies_recording_window(
+    hass: HomeAssistant, holder: SourceHolder, hass_client, aioclient_mock
+) -> None:
+    aioclient_mock.get(UPSTREAM_REVIEW_CLIP, content=CLIP_BYTES, headers={"Content-Type": "video/mp4"})
+    client = await hass_client()
+    resp = await client.get(REVIEW_CLIP_PATH)
+    assert resp.status == HTTPStatus.OK
+    assert await resp.read() == CLIP_BYTES
+    assert _sent_headers(aioclient_mock)["Authorization"] == "Bearer frigate-token"
+
+
+async def test_review_clip_ranges_buffered_without_repeated_lookups(
+    hass: HomeAssistant, holder: SourceHolder, hass_client, aioclient_mock
+) -> None:
+    aioclient_mock.get(UPSTREAM_REVIEW_CLIP, content=CLIP_BYTES, headers={"Content-Type": "video/mp4"})
+    client = await hass_client()
+    resp = await client.get(REVIEW_CLIP_PATH, headers={"Range": "bytes=0-1"})
+    assert resp.status == HTTPStatus.PARTIAL_CONTENT
+    assert await resp.read() == CLIP_BYTES[:2]
+    resp = await client.get(REVIEW_CLIP_PATH, headers={"Range": "bytes=1000-"})
+    assert resp.status == HTTPStatus.PARTIAL_CONTENT
+    assert await resp.read() == CLIP_BYTES[1000:]
+    assert aioclient_mock.call_count == 1
+    assert holder.source.review_lookups == 1
+
+
+async def test_review_thumbnail(hass: HomeAssistant, holder: SourceHolder, hass_client, aioclient_mock) -> None:
+    aioclient_mock.get(UPSTREAM_REVIEW_THUMB, content=b"webp", headers={"Content-Type": "image/webp"})
+    client = await hass_client()
+    resp = await client.get(REVIEW_THUMB_PATH)
+    assert resp.status == HTTPStatus.OK
+    assert await resp.read() == b"webp"
+    assert resp.headers["Content-Type"] == "image/webp"
+
+
+@pytest.mark.parametrize(
+    ("review", "path"),
+    [
+        (None, REVIEW_CLIP_PATH),
+        ({**REVIEW, "end_time": None}, REVIEW_CLIP_PATH),
+        ({**REVIEW, "camera": None}, REVIEW_CLIP_PATH),
+        ({**REVIEW, "thumb_path": None}, REVIEW_THUMB_PATH),
+        ({**REVIEW, "thumb_path": "/media/frigate/clips/review/thumb.jpg"}, REVIEW_THUMB_PATH),
+    ],
+    ids=["unknown", "in_progress", "no_camera", "no_thumb", "not_webp"],
+)
+async def test_review_media_not_found(
+    hass: HomeAssistant, holder: SourceHolder, hass_client, aioclient_mock, review, path: str
+) -> None:
+    if review is None:
+        holder.source.reviews.clear()
+    else:
+        holder.source.reviews[REVIEW_ID] = review
+    client = await hass_client()
+    resp = await client.get(path)
+    assert resp.status == HTTPStatus.NOT_FOUND
+    assert aioclient_mock.call_count == 0
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"/api/frigate_feed/media/review/{REVIEW_ID}/snapshot.jpg",
+        "/api/frigate_feed/media/review/not-an-id/clip.mp4",
+    ],
+)
+async def test_review_invalid_kind_or_id(
+    hass: HomeAssistant, holder: SourceHolder, hass_client, aioclient_mock, path: str
+) -> None:
+    client = await hass_client()
+    resp = await client.get(path)
+    assert resp.status == HTTPStatus.NOT_FOUND
+    assert holder.source.review_lookups == 0
+    assert aioclient_mock.call_count == 0
+
+
+async def test_review_media_requires_auth(hass: HomeAssistant, holder: SourceHolder, hass_client_no_auth) -> None:
+    client = await hass_client_no_auth()
+    resp = await client.get(REVIEW_CLIP_PATH)
+    assert resp.status == HTTPStatus.UNAUTHORIZED

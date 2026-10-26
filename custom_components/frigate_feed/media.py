@@ -1,4 +1,4 @@
-"""Authenticated media proxy for Frigate event snapshots and clips."""
+"""Authenticated media proxy for Frigate snapshots, review thumbnails and clips."""
 
 from __future__ import annotations
 
@@ -8,9 +8,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from http import HTTPStatus
 import logging
+from pathlib import PurePosixPath
 import re
 import time
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 from aiohttp import hdrs, web
@@ -28,8 +30,11 @@ from .const import (
     MEDIA_KIND_SNAPSHOT,
     MEDIA_KINDS,
     MEDIA_URL,
+    REVIEW_MEDIA_KINDS,
+    REVIEW_MEDIA_URL,
     SIGNED_URL_EXPIRY,
 )
+from .feed import clip_bounds
 from .frigate_source import FrigateSource
 
 _LOGGER = logging.getLogger(__name__)
@@ -79,19 +84,23 @@ _RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 def async_register_media_views(
     hass: HomeAssistant, get_source: Callable[[], FrigateSource | None]
 ) -> None:
-    """Register the media proxy view once (idempotent).
+    """Register the media proxy views once (idempotent).
 
-    The view is served at MEDIA_URL ("/api/frigate_feed/media/{event_id}/{kind}"),
-    requires HA auth (signed paths work), validates event_id and kind (MEDIA_KINDS),
-    and streams `{source.base_url}/api/events/{event_id}/{kind}` using
-    `source.auth_headers()` and `source.verify_ssl`. Range/If-Range request headers
-    and the upstream status are passed through. 404 when the source is unavailable or
-    the event is unknown, 502 on upstream errors.
+    Both views require HA auth (signed paths work) and stream from Frigate using
+    `source.auth_headers()` and `source.verify_ssl`:
+    - MEDIA_URL ("/api/frigate_feed/media/{event_id}/{kind}", MEDIA_KINDS) streams
+      `{source.base_url}/api/events/{event_id}/{kind}`.
+    - REVIEW_MEDIA_URL ("/api/frigate_feed/media/review/{review_id}/{kind}",
+      REVIEW_MEDIA_KINDS) looks the review item up in Frigate and streams the camera
+      recording over its window (`clip.mp4`) or its thumbnail (`thumb.webp`).
+    Range/If-Range request headers and the upstream status are passed through. 404
+    when the source is unavailable or the id is unknown, 502 on upstream errors.
     """
     if hass.data.get(DATA_MEDIA_VIEWS_REGISTERED):
         return
     hass.data[DATA_MEDIA_VIEWS_REGISTERED] = True
     hass.http.register_view(FrigateFeedMediaView(hass, get_source))
+    hass.http.register_view(FrigateFeedReviewMediaView(hass, get_source))
 
 
 def sign_item_urls(hass: HomeAssistant, item: dict[str, Any]) -> dict[str, Any]:
@@ -259,13 +268,25 @@ class FrigateFeedMediaView(HomeAssistantView):
             self._clip_cache = hass.data[DATA_CLIP_CACHE] = _ClipCache(hass)
 
     async def get(self, request: web.Request, event_id: str, kind: str) -> web.StreamResponse:
-        """Stream one media file from Frigate."""
+        """Stream one event media file from Frigate."""
         if kind not in MEDIA_KINDS or not is_valid_event_id(event_id):
             return web.Response(status=HTTPStatus.NOT_FOUND)
         source = self._get_source()
         if source is None:
             return web.Response(status=HTTPStatus.NOT_FOUND)
+        return await self._async_serve(
+            request, source, f"/api/events/{event_id}/{kind}", kind, f"event|{event_id}"
+        )
 
+    async def _async_serve(
+        self,
+        request: web.Request,
+        source: FrigateSource,
+        upstream_path: str,
+        kind: str,
+        cache_id: str,
+    ) -> web.StreamResponse:
+        """Proxy `{source.base_url}{upstream_path}`; clip ranges go through the clip cache."""
         try:
             base_url = source.base_url
             auth_headers = source.auth_headers()
@@ -274,7 +295,7 @@ class FrigateFeedMediaView(HomeAssistantView):
             _LOGGER.debug("Frigate source not ready for media request", exc_info=True)
             return web.Response(status=HTTPStatus.NOT_FOUND)
 
-        upstream_url = f"{base_url.rstrip('/')}/api/events/{event_id}/{kind}"
+        upstream_url = f"{base_url.rstrip('/')}{upstream_path}"
         params = _snapshot_params(request) if kind == MEDIA_KIND_SNAPSHOT else {}
         headers = dict(auth_headers)
         for name in FORWARDED_REQUEST_HEADERS:
@@ -284,7 +305,7 @@ class FrigateFeedMediaView(HomeAssistantView):
         session = async_get_clientsession(self.hass, verify_ssl=verify_ssl)
         range_header = request.headers.get(hdrs.RANGE)
         if kind == MEDIA_KIND_CLIP and range_header and hdrs.IF_RANGE not in request.headers:
-            cache_key = f"{base_url}|{event_id}"
+            cache_key = f"{base_url}|{cache_id}"
             return await self._async_serve_clip_range(
                 request, session, upstream_url, headers, cache_key, range_header
             )
@@ -362,6 +383,64 @@ class FrigateFeedMediaView(HomeAssistantView):
         finally:
             if locked:
                 cache.lock.release()
+
+
+class FrigateFeedReviewMediaView(FrigateFeedMediaView):
+    """Proxy the recording clip and thumbnail of a Frigate review item."""
+
+    url = REVIEW_MEDIA_URL
+    name = "api:frigate_feed:review_media"
+
+    async def get(self, request: web.Request, review_id: str, kind: str) -> web.StreamResponse:  # type: ignore[override]
+        """Stream a review item's clip or thumbnail from Frigate."""
+        if kind not in REVIEW_MEDIA_KINDS or not is_valid_event_id(review_id):
+            return web.Response(status=HTTPStatus.NOT_FOUND)
+        source = self._get_source()
+        if source is None:
+            return web.Response(status=HTTPStatus.NOT_FOUND)
+        cache_id = f"review|{review_id}"
+        if kind == MEDIA_KIND_CLIP and (range_header := request.headers.get(hdrs.RANGE)):
+            # Seeking re-requests ranges; serve buffered clips without a review lookup.
+            try:
+                cached = self._clip_cache.get(f"{source.base_url}|{cache_id}")
+            except Exception:  # noqa: BLE001 - source not ready behaves like unavailable
+                cached = None
+            if cached is not None and hdrs.IF_RANGE not in request.headers:
+                return _range_response(cached, range_header)
+        review = await source.async_get_review(review_id)
+        if review is None:
+            return web.Response(status=HTTPStatus.NOT_FOUND)
+        upstream_path = (
+            _review_clip_path(review, source) if kind == MEDIA_KIND_CLIP else _review_thumb_path(review)
+        )
+        if upstream_path is None:
+            return web.Response(status=HTTPStatus.NOT_FOUND)
+        return await self._async_serve(request, source, upstream_path, kind, cache_id)
+
+
+def _review_clip_path(review: dict[str, Any], source: FrigateSource) -> str | None:
+    """Frigate recordings clip path over the padded window of an ended review item."""
+    camera = review.get("camera")
+    try:
+        start = float(review["start_time"])
+        end = float(review["end_time"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not isinstance(camera, str) or not camera:
+        return None
+    clip_start, clip_end = clip_bounds(review, source, start, end)
+    return f"/api/{quote(camera, safe='')}/start/{clip_start}/end/{clip_end}/clip.mp4"
+
+
+def _review_thumb_path(review: dict[str, Any]) -> str | None:
+    """Frigate serves review thumbnails from /clips/review/ (thumb_path is a container path)."""
+    thumb_path = review.get("thumb_path")
+    if not isinstance(thumb_path, str) or not thumb_path:
+        return None
+    name = PurePosixPath(thumb_path).name
+    if not name.endswith(".webp"):
+        return None
+    return f"/clips/review/{quote(name, safe='')}"
 
 
 def _map_upstream_status(status: int, url: str) -> web.Response | None:
