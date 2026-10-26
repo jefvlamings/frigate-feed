@@ -384,9 +384,69 @@ async def test_resolve_recording(hass: HomeAssistant, fake_frigate, source) -> N
 
     # Event finished since the last list: recording becomes linked.
     in_progress = next(event for event in fake_frigate.client.events if event["id"] == IN_PROGRESS_ID)
-    in_progress["end_time"] = in_progress["start_time"] + 10
+    in_progress["end_time"] = in_progress["start_time"] + 2  # ended ~28s ago: clip ready
     assert (await manager.async_resolve_recording(IN_PROGRESS_ID))["status"] == "linked"
 
     with pytest.raises(ValueError):
         await manager.async_resolve_recording("missing")
     await manager.async_stop()
+
+
+def _just_ended(fake_frigate, seconds_ago: float) -> dict[str, Any]:
+    """The in-progress fixture event, ended `seconds_ago` seconds before now."""
+    for event in fake_frigate.events:
+        if event["id"] == IN_PROGRESS_ID:
+            event["end_time"] = time.time() - seconds_ago
+            return copy.deepcopy(event)
+    raise AssertionError("fixture event missing")
+
+
+async def test_recently_ended_clip_stays_pending_until_ready(hass: HomeAssistant, fake_frigate, source) -> None:
+    # front_door alert: post_capture 8 + CLIP_READY_GRACE_SECONDS 15 -> ready 23s after end.
+    assert event_to_item(_just_ended(fake_frigate, 5), source).recording == {"status": "pending"}
+    assert event_to_item(_just_ended(fake_frigate, 30), source).recording["status"] == "linked"
+
+
+async def test_clip_ready_announces_feed_update(hass: HomeAssistant, fake_frigate, source) -> None:
+    from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
+    from custom_components.frigate_feed.const import SIGNAL_FEED_UPDATED
+
+    _just_ended(fake_frigate, 5)
+    received: list[dict[str, Any]] = []
+    async_dispatcher_connect(hass, SIGNAL_FEED_UPDATED, received.append)
+    manager = _manager(hass, source)
+    await manager.async_start()
+
+    items = await manager.async_list_items()
+    assert next(i for i in items if i.id == IN_PROGRESS_ID).recording == {"status": "pending"}
+    await manager.async_list_items()  # cached; must not schedule a second timer
+    assert len(manager._clip_ready_timers) == 1
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=30))
+    await hass.async_block_till_done()
+    assert received == [
+        {"type": "clip_ready", "event_id": IN_PROGRESS_ID, "camera": "front_door", "label": "person"}
+    ]
+    assert manager._clip_ready_timers == {}
+    _just_ended(fake_frigate, 60)  # HA timers moved on; move the event's real end time too
+    items = await manager.async_list_items()
+    assert next(i for i in items if i.id == IN_PROGRESS_ID).recording["status"] == "linked"
+    await manager.async_stop()
+
+
+async def test_stop_cancels_clip_ready_timers(hass: HomeAssistant, fake_frigate, source) -> None:
+    from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
+    from custom_components.frigate_feed.const import SIGNAL_FEED_UPDATED
+
+    _just_ended(fake_frigate, 5)
+    received: list[dict[str, Any]] = []
+    async_dispatcher_connect(hass, SIGNAL_FEED_UPDATED, received.append)
+    manager = _manager(hass, source)
+    await manager.async_start()
+    await manager.async_list_items()
+    await manager.async_stop()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=30))
+    await hass.async_block_till_done()
+    assert received == []
