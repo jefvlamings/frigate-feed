@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
+<rect width="320" height="180" fill="#2f4a3a"/>
+<rect y="110" width="320" height="70" fill="#5b7f5f"/>
+<ellipse cx="160" cy="120" rx="36" ry="16" fill="#b07a45"/><circle cx="196" cy="104" r="12" fill="#b07a45"/><rect x="134" y="128" width="6" height="14" fill="#b07a45"/><rect x="178" y="128" width="6" height="14" fill="#b07a45"/>
+<text x="310" y="20" text-anchor="end" font-family="monospace" font-size="11" fill="#fff" opacity="0.8">Front Yard - placeholder pet</text>
+</svg>

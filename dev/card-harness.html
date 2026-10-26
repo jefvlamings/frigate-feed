@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Frigate Feed Card Harness</title>
+    <!-- Dev-only: Material Design Icons for the ha-icon stub (falls back to text when offline). -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" />
+    <style>
+      /* Approximation of the default Home Assistant dark theme variables used by the card. */
+      :root {
+        --primary-text-color: #e1e1e1;
+        --secondary-text-color: #9b9b9b;
+        --divider-color: rgba(225, 225, 225, 0.12);
+        --secondary-background-color: #282828;
+        --card-background-color: #1c1c1c;
+        --ha-card-background: #1c1c1c;
+        --primary-background-color: #111111;
+        --error-color: #db4437;
+        --primary-color: #03a9f4;
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--primary-background-color);
+        color: var(--primary-text-color);
+        font-family: Roboto, "Segoe UI", system-ui, sans-serif;
+      }
+      .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; font-size: 12px; }
+      .toolbar button {
+        border: 1px solid var(--divider-color);
+        background: var(--secondary-background-color);
+        color: var(--primary-text-color);
+        border-radius: 8px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+      .toolbar .meta { color: var(--secondary-text-color); }
+      #card-host { max-width: var(--harness-width, 560px); }
+      #log {
+        margin-top: 16px;
+        max-width: 560px;
+        max-height: 180px;
+        overflow: auto;
+        font: 11px/1.4 ui-monospace, monospace;
+        color: var(--secondary-text-color);
+        white-space: pre-wrap;
+      }
+      #toast {
+        position: fixed;
+        left: 50%;
+        bottom: 16px;
+        transform: translateX(-50%);
+        background: #323232;
+        color: #fff;
+        padding: 10px 16px;
+        border-radius: 6px;
+        font-size: 13px;
+        opacity: 0;
+        transition: opacity 150ms ease;
+        pointer-events: none;
+        z-index: 1000;
+      }
+      #toast.visible { opacity: 1; }
+    </style>
+  </head>
+  <body>
+    <div class="toolbar">
+      <button id="simulate-mqtt" type="button">Simulate MQTT update</button>
+      <button id="toggle-lang" type="button">Toggle EN/NL</button>
+      <span class="meta" id="meta"></span>
+    </div>
+    <div id="card-host"></div>
+    <div id="log"></div>
+    <div id="toast"></div>
+
+    <script>
+      // Minimal stubs for the Home Assistant elements the card uses.
+      (() => {
+        const MDI_CSS = "https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css";
+
+        class HaCardStub extends HTMLElement {
+          constructor() {
+            super();
+            this.attachShadow({ mode: "open" }).innerHTML = `
+              <style>
+                :host {
+                  display: block;
+                  background: var(--ha-card-background, var(--card-background-color, #1c1c1c));
+                  border-radius: 12px;
+                  border: 1px solid var(--divider-color);
+                  color: var(--primary-text-color);
+                  font-size: 14px;
+                }
+              </style>
+              <slot></slot>
+            `;
+          }
+        }
+
+        class HaIconStub extends HTMLElement {
+          static get observedAttributes() {
+            return ["icon"];
+          }
+          constructor() {
+            super();
+            this.attachShadow({ mode: "open" });
+          }
+          connectedCallback() {
+            this._render();
+          }
+          attributeChangedCallback() {
+            this._render();
+          }
+          _render() {
+            const icon = String(this.getAttribute("icon") || "");
+            const name = icon.replace(/^mdi:/, "");
+            this.shadowRoot.innerHTML = `
+              <link rel="stylesheet" href="${MDI_CSS}" />
+              <style>
+                :host {
+                  display: inline-flex;
+                  align-items: center;
+                  justify-content: center;
+                  width: var(--mdc-icon-size, 24px);
+                  height: var(--mdc-icon-size, 24px);
+                  line-height: 1;
+                  vertical-align: middle;
+                }
+                i { font-size: var(--mdc-icon-size, 24px); line-height: 1; }
+              </style>
+              <i class="mdi mdi-${name}" title="${icon}"></i>
+            `;
+          }
+        }
+
+        class HaDialogStub extends HTMLElement {
+          static get observedAttributes() {
+            return ["open"];
+          }
+          constructor() {
+            super();
+            this.attachShadow({ mode: "open" }).innerHTML = `
+              <style>
+                :host { display: none; }
+                :host([open]) { display: block; }
+                .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; }
+                .surface {
+                  position: fixed;
+                  left: 50%;
+                  top: 50%;
+                  transform: translate(-50%, -50%);
+                  width: min(var(--ha-dialog-width-md, 580px), calc(100vw - 32px));
+                  max-height: calc(100vh - 32px);
+                  display: flex;
+                  flex-direction: column;
+                  background: var(--card-background-color, #1c1c1c);
+                  color: var(--primary-text-color);
+                  border-radius: 24px;
+                  overflow: hidden;
+                  z-index: 101;
+                  box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+                }
+                @media (max-width: 450px) {
+                  .surface { width: 100vw; height: 100vh; max-height: none; border-radius: 0; }
+                }
+                header { display: flex; align-items: center; gap: 8px; padding: 12px 12px 12px 24px; font-size: 18px; min-width: 0; }
+                header .title { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+                header button { border: 0; background: transparent; color: inherit; font-size: 20px; cursor: pointer; width: 40px; height: 40px; border-radius: 999px; }
+                header button:hover { background: rgba(255,255,255,0.08); }
+                .content { padding: var(--dialog-content-padding, 24px); overflow: auto; flex: 1 1 auto; }
+                footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 24px; }
+              </style>
+              <div class="backdrop" part="backdrop"></div>
+              <div class="surface" role="dialog" aria-modal="true">
+                <header>
+                  <div class="title"><slot name="headerTitle"></slot></div>
+                  <button class="close" type="button" aria-label="Close">&#x2715;</button>
+                </header>
+                <div class="content"><slot></slot></div>
+                <footer><slot name="footer"></slot></footer>
+              </div>
+            `;
+            this.shadowRoot.querySelector(".backdrop").addEventListener("click", () => this.close());
+            this.shadowRoot.querySelector("button.close").addEventListener("click", () => this.close());
+            this._onKeyDown = (ev) => {
+              if (ev.key === "Escape" && this.hasAttribute("open")) this.close();
+            };
+          }
+          connectedCallback() {
+            window.addEventListener("keydown", this._onKeyDown);
+          }
+          disconnectedCallback() {
+            window.removeEventListener("keydown", this._onKeyDown);
+          }
+          close() {
+            if (!this.hasAttribute("open")) return;
+            this.removeAttribute("open");
+            this.dispatchEvent(new Event("closed", { bubbles: true, composed: true }));
+          }
+        }
+
+        class HaSwitchStub extends HTMLElement {
+          constructor() {
+            super();
+            this.attachShadow({ mode: "open" }).innerHTML = `<input type="checkbox" />`;
+            const input = this.shadowRoot.querySelector("input");
+            input.addEventListener("change", () => {
+              this.checked = input.checked;
+              this.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+            });
+          }
+          connectedCallback() {
+            this.checked = this.hasAttribute("checked");
+            this.shadowRoot.querySelector("input").checked = this.checked;
+          }
+        }
+
+        const define = (name, cls) => {
+          if (!customElements.get(name)) customElements.define(name, cls);
+        };
+        define("ha-card", HaCardStub);
+        define("ha-icon", HaIconStub);
+        define("ha-dialog", HaDialogStub);
+        define("ha-switch", HaSwitchStub);
+      })();
+    </script>
+
+    <script type="module">
+      const params = new URLSearchParams(window.location.search);
+      const defaultSrc = "../custom_components/frigate_feed/frontend/frigate-feed-card.js";
+      const src = params.get("src") || defaultSrc;
+      const tag = params.get("tag") || (/reolink/i.test(src) ? "reolink-feed-card" : "frigate-feed-card");
+      const width = params.get("width");
+      if (width) document.documentElement.style.setProperty("--harness-width", `${Number(width) || 560}px`);
+      // ?expired=1: the first list response returns broken media URLs (like expired signatures).
+      let expireNextList = params.get("expired") === "1";
+
+      const logEl = document.getElementById("log");
+      const log = (message) => {
+        const line = `${new Date().toLocaleTimeString([], { hour12: false })} ${message}`;
+        logEl.textContent = `${line}\n${logEl.textContent}`.slice(0, 8000);
+        console.debug(`[harness] ${message}`);
+      };
+
+      const toastEl = document.getElementById("toast");
+      let toastTimer = null;
+      document.addEventListener("hass-notification", (ev) => {
+        toastEl.textContent = ev.detail?.message || "";
+        toastEl.classList.add("visible");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 2500);
+        log(`toast: ${ev.detail?.message}`);
+      });
+
+      const fixtureUrl = (name) => new URL(`fixtures/${name}`, window.location.href).pathname;
+      const fixture = await (await fetch("fixtures/items.json")).json();
+
+      // Rebase fixture times so the newest detection is two minutes ago.
+      const newestTs = Math.max(...fixture.items.map((item) => Date.parse(item.start_ts)));
+      const shiftMs = Date.now() - 2 * 60 * 1000 - newestTs;
+      const shiftIso = (value) => (value ? new Date(Date.parse(value) + shiftMs).toISOString() : value);
+      const db = fixture.items.map((item) => ({
+        ...item,
+        start_ts: shiftIso(item.start_ts),
+        end_ts: shiftIso(item.end_ts),
+        snapshot_url: item.snapshot_url,
+        recording: {
+          ...item.recording,
+          clip_start_ts: shiftIso(item.recording.clip_start_ts),
+          clip_end_ts: shiftIso(item.recording.clip_end_ts),
+          resolved_at: shiftIso(item.recording.resolved_at),
+        },
+      }));
+      const hidden = new Set();
+      let signatureCounter = 0;
+
+      // Mimic the backend: media URLs are signed paths that change on every list call.
+      const signItem = (item, broken) => {
+        signatureCounter += 1;
+        const sign = (name) =>
+          name ? `${fixtureUrl(broken ? `expired-${name}` : name)}?authSig=sig${signatureCounter}` : null;
+        return {
+          ...item,
+          snapshot_url: sign(item.snapshot_url),
+          recording: { ...item.recording, local_url: sign(item.recording.local_url) },
+        };
+      };
+
+      const commandName = (type) => String(type || "").replace(/^(frigate_feed|reolink_feed)\//, "");
+      const subscribers = new Set();
+
+      const hass = {
+        language: params.get("lang") || "en",
+        locale: { language: params.get("lang") || "en" },
+        states: {},
+        user: { is_admin: true, name: "Harness" },
+        navigate: (path) => log(`navigate: ${path}`),
+        callService: async (domain, service, data) => {
+          log(`callService ${domain}.${service} ${JSON.stringify(data || {})}`);
+        },
+        callWS: async (msg) => {
+          await new Promise((resolve) => setTimeout(resolve, 80));
+          const cmd = commandName(msg.type);
+          log(`callWS ${msg.type} ${JSON.stringify({ ...msg, type: undefined })}`);
+          if (cmd === "list") {
+            const broken = expireNextList;
+            expireNextList = false;
+            const items = db
+              .filter((item) => !hidden.has(item.id))
+              .sort((a, b) => Date.parse(b.start_ts) - Date.parse(a.start_ts))
+              .map((item) => signItem(item, broken));
+            return {
+              items,
+              enabled_labels: [...fixture.enabled_labels],
+              retention_hours: fixture.retention_hours,
+            };
+          }
+          if (cmd === "resolve_recording") {
+            const item = db.find((entry) => entry.id === msg.item_id);
+            if (!item) throw new Error("item_not_found");
+            return signItem(item, false).recording;
+          }
+          if (cmd === "delete_item") {
+            if (!db.some((entry) => entry.id === msg.item_id)) throw new Error("item_not_found");
+            hidden.add(msg.item_id);
+            return { ok: true };
+          }
+          throw new Error(`unknown_command: ${msg.type}`);
+        },
+        connection: {
+          _listeners: {},
+          addEventListener(name, cb) {
+            (this._listeners[name] ||= new Set()).add(cb);
+          },
+          removeEventListener(name, cb) {
+            this._listeners[name]?.delete(cb);
+          },
+          subscribeMessage: async (callback, msg) => {
+            log(`subscribeMessage ${msg.type}`);
+            subscribers.add(callback);
+            return async () => {
+              subscribers.delete(callback);
+              log(`unsubscribe ${msg.type}`);
+            };
+          },
+        },
+      };
+
+      const simulationTemplates = [
+        { camera: "front_yard", camera_name: "Front Yard", label: "person", frigate_label: "person" },
+        { camera: "driveway", camera_name: "Driveway", label: "vehicle", frigate_label: "car" },
+        { camera: "driveway", camera_name: "Driveway", label: "pet", frigate_label: "dog" },
+      ];
+      let simulationCount = 0;
+
+      document.getElementById("simulate-mqtt").addEventListener("click", () => {
+        // Promote pending detections to linked and add a new in-progress detection.
+        for (const item of db) {
+          if (item.recording.status !== "pending") continue;
+          item.end_ts = new Date(Date.parse(item.start_ts) + 20 * 1000).toISOString();
+          item.duration_s = 20;
+          item.recording = {
+            ...item.recording,
+            status: "linked",
+            local_url: "clip.mp4",
+            start_offset_s: 5,
+            clip_start_ts: new Date(Date.parse(item.start_ts) - 5000).toISOString(),
+            clip_end_ts: item.end_ts,
+            resolved_at: new Date().toISOString(),
+          };
+        }
+        const template = simulationTemplates[simulationCount % simulationTemplates.length];
+        simulationCount += 1;
+        const start = new Date();
+        const eventId = `${(start.getTime() / 1000).toFixed(6)}-sim${simulationCount}`;
+        db.push({
+          id: eventId,
+          start_ts: start.toISOString(),
+          end_ts: null,
+          duration_s: 0,
+          label: template.label,
+          source_entity_id: `binary_sensor.${template.camera}_${template.frigate_label}_occupancy`,
+          camera_name: template.camera_name,
+          snapshot_url: `${template.camera}_${template.label}.svg`,
+          recording: {
+            status: "pending",
+            local_url: null,
+            start_offset_s: null,
+            clip_start_ts: null,
+            clip_end_ts: null,
+            resolved_at: null,
+          },
+          frigate: {
+            event_id: eventId,
+            label: template.frigate_label,
+            sub_label: null,
+            score: 0.8,
+            zones: [],
+            camera: template.camera,
+          },
+        });
+        const payload = {
+          event: { type: "new", event_id: eventId, camera: template.camera, label: template.frigate_label },
+        };
+        log(`push to ${subscribers.size} subscriber(s): ${JSON.stringify(payload)}`);
+        subscribers.forEach((cb) => cb(payload));
+      });
+
+      document.getElementById("toggle-lang").addEventListener("click", () => {
+        params.set("lang", hass.language === "nl" ? "en" : "nl");
+        window.location.search = params.toString();
+      });
+
+      document.getElementById("meta").textContent = `src=${src} tag=${tag} lang=${hass.language}`;
+
+      await import(new URL(src, window.location.href).href);
+      await customElements.whenDefined(tag);
+      const card = document.createElement(tag);
+      card.setConfig({ type: `custom:${tag}`, ...JSON.parse(params.get("config") || "{}") });
+      card.hass = hass;
+      document.getElementById("card-host").appendChild(card);
+      window.harness = { card, hass, db, hidden, subscribers };
+      log(`rendered <${tag}>`);
+    </script>
+  </body>
+</html>

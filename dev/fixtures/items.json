@@ -1,0 +1,334 @@
+{
+  "items": [
+    {
+      "id": "1793016000.000000-fx0000",
+      "start_ts": "2026-10-26T12:00:00+00:00",
+      "end_ts": null,
+      "duration_s": 0,
+      "label": "person",
+      "source_entity_id": "binary_sensor.front_yard_person_occupancy",
+      "camera_name": "Front Yard",
+      "snapshot_url": "front_yard_person.svg",
+      "recording": {
+        "status": "pending",
+        "local_url": null,
+        "start_offset_s": null,
+        "clip_start_ts": null,
+        "clip_end_ts": null,
+        "resolved_at": null
+      },
+      "frigate": {
+        "event_id": "1793016000.000000-fx0000",
+        "label": "person",
+        "sub_label": null,
+        "score": 0.81,
+        "zones": [
+          "porch"
+        ],
+        "camera": "front_yard"
+      }
+    },
+    {
+      "id": "1793015880.000000-fx0001",
+      "start_ts": "2026-10-26T11:58:00+00:00",
+      "end_ts": "2026-10-26T11:58:24+00:00",
+      "duration_s": 24,
+      "label": "pet",
+      "source_entity_id": "binary_sensor.front_yard_dog_occupancy",
+      "camera_name": "Front Yard",
+      "snapshot_url": "front_yard_pet.svg",
+      "recording": {
+        "status": "linked",
+        "local_url": "clip.mp4",
+        "start_offset_s": 5.0,
+        "clip_start_ts": "2026-10-26T11:57:55+00:00",
+        "clip_end_ts": "2026-10-26T11:58:24+00:00",
+        "resolved_at": "2026-10-26T12:00:00+00:00"
+      },
+      "frigate": {
+        "event_id": "1793015880.000000-fx0001",
+        "label": "dog",
+        "sub_label": null,
+        "score": 0.77,
+        "zones": [],
+        "camera": "front_yard"
+      }
+    },
+    {
+      "id": "1793015820.000000-fx0002",
+      "start_ts": "2026-10-26T11:57:00+00:00",
+      "end_ts": "2026-10-26T11:57:18+00:00",
+      "duration_s": 18,
+      "label": "person",
+      "source_entity_id": "binary_sensor.front_yard_person_occupancy",
+      "camera_name": "Front Yard",
+      "snapshot_url": "front_yard_person.svg",
+      "recording": {
+        "status": "linked",
+        "local_url": "clip.mp4",
+        "start_offset_s": 5.0,
+        "clip_start_ts": "2026-10-26T11:56:55+00:00",
+        "clip_end_ts": "2026-10-26T11:57:18+00:00",
+        "resolved_at": "2026-10-26T12:00:00+00:00"
+      },
+      "frigate": {
+        "event_id": "1793015820.000000-fx0002",
+        "label": "person",
+        "sub_label": null,
+        "score": 0.9,
+        "zones": [
+          "porch"
+        ],
+        "camera": "front_yard"
+      }
+    },
+    {
+      "id": "1793015700.000000-fx0003",
+      "start_ts": "2026-10-26T11:55:00+00:00",
+      "end_ts": "2026-10-26T11:55:40+00:00",
+      "duration_s": 40,
+      "label": "vehicle",
+      "source_entity_id": "binary_sensor.driveway_car_occupancy",
+      "camera_name": "Driveway",
+      "snapshot_url": "driveway_vehicle.svg",
+      "recording": {
+        "status": "linked",
+        "local_url": "clip.mp4",
+        "start_offset_s": 5.0,
+        "clip_start_ts": "2026-10-26T11:54:55+00:00",
+        "clip_end_ts": "2026-10-26T11:55:40+00:00",
+        "resolved_at": "2026-10-26T12:00:00+00:00"
+      },
+      "frigate": {
+        "event_id": "1793015700.000000-fx0003",
+        "label": "car",
+        "sub_label": null,
+        "score": 0.88,
+        "zones": [
+          "street"
+        ],
+        "camera": "driveway"
+      }
+    },
+    {
+      "id": "1793010300.000000-fx0004",
+      "start_ts": "2026-10-26T10:25:00+00:00",
+      "end_ts": "2026-10-26T10:25:12+00:00",
+      "duration_s": 12,
+      "label": "pet",
+      "source_entity_id": "binary_sensor.driveway_cat_occupancy",
+      "camera_name": "Driveway",
+      "snapshot_url": "driveway_pet.svg",
+      "recording": {
+        "status": "not_found",
+        "local_url": null,
+        "start_offset_s": null,
+        "clip_start_ts": null,
+        "clip_end_ts": null,
+        "resolved_at": "2026-10-26T12:00:00+00:00"
+      },
+      "frigate": {
+        "event_id": "1793010300.000000-fx0004",
+        "label": "cat",
+        "sub_label": null,
+        "score": 0.71,
+        "zones": [],
+        "camera": "driveway"
+      }
+    },
+    {
+      "id": "1793005200.000000-fx0005",
+      "start_ts": "2026-10-26T09:00:00+00:00",
+      "end_ts": "2026-10-26T09:00:33+00:00",
+      "duration_s": 33,
+      "label": "person",
+      "source_entity_id": "binary_sensor.driveway_person_occupancy",
+      "camera_name": "Driveway",
+      "snapshot_url": "driveway_person.svg",
+      "recording": {
+        "status": "linked",
+        "local_url": "clip.mp4",
+        "start_offset_s": 5.0,
+        "clip_start_ts": "2026-10-26T08:59:55+00:00",
+        "clip_end_ts": "2026-10-26T09:00:33+00:00",
+        "resolved_at": "2026-10-26T12:00:00+00:00"
+      },
+      "frigate": {
+        "event_id": "1793005200.000000-fx0005",
+        "label": "person",
+        "sub_label": null,
+        "score": 0.86,
+        "zones": [],
+        "camera": "driveway"
+      }
+    },
+    {
+      "id": "1793004960.000000-fx0006",
+      "start_ts": "2026-10-26T08:56:00+00:00",
+      "end_ts": "2026-10-26T08:56:09+00:00",
+      "duration_s": 9,
+      "label": "vehicle",
+      "source_entity_id": "binary_sensor.driveway_truck_occupancy",
+      "camera_name": "Driveway",
+      "snapshot_url": "driveway_vehicle.svg",
+      "recording": {
+        "status": "download_failed",
+        "local_url": null,
+        "start_offset_s": null,
+        "clip_start_ts": null,
+        "clip_end_ts": null,
+        "resolved_at": "2026-10-26T12:00:00+00:00"
+      },
+      "frigate": {
+        "event_id": "1793004960.000000-fx0006",
+        "label": "truck",
+        "sub_label": null,
+        "score": 0.65,
+        "zones": [
+          "street"
+        ],
+        "camera": "driveway"
+      }
+    },
+    {
+      "id": "1792994400.000000-fx0007",
+      "start_ts": "2026-10-26T06:00:00+00:00",
+      "end_ts": "2026-10-26T06:00:51+00:00",
+      "duration_s": 51,
+      "label": "vehicle",
+      "source_entity_id": "binary_sensor.front_yard_bicycle_occupancy",
+      "camera_name": "Front Yard",
+      "snapshot_url": "front_yard_vehicle.svg",
+      "recording": {
+        "status": "linked",
+        "local_url": "clip.mp4",
+        "start_offset_s": 5.0,
+        "clip_start_ts": "2026-10-26T05:59:55+00:00",
+        "clip_end_ts": "2026-10-26T06:00:51+00:00",
+        "resolved_at": "2026-10-26T12:00:00+00:00"
+      },
+      "frigate": {
+        "event_id": "1792994400.000000-fx0007",
+        "label": "bicycle",
+        "sub_label": null,
+        "score": 0.7,
+        "zones": [],
+        "camera": "front_yard"
+      }
+    },
+    {
+      "id": "1792980000.000000-fx0008",
+      "start_ts": "2026-10-26T02:00:00+00:00",
+      "end_ts": "2026-10-26T02:00:15+00:00",
+      "duration_s": 15,
+      "label": "person",
+      "source_entity_id": "binary_sensor.front_yard_person_occupancy",
+      "camera_name": "Front Yard",
+      "snapshot_url": "front_yard_person.svg",
+      "recording": {
+        "status": "not_found",
+        "local_url": null,
+        "start_offset_s": null,
+        "clip_start_ts": null,
+        "clip_end_ts": null,
+        "resolved_at": "2026-10-26T12:00:00+00:00"
+      },
+      "frigate": {
+        "event_id": "1792980000.000000-fx0008",
+        "label": "person",
+        "sub_label": null,
+        "score": 0.83,
+        "zones": [
+          "porch"
+        ],
+        "camera": "front_yard"
+      }
+    },
+    {
+      "id": "1792965600.000000-fx0009",
+      "start_ts": "2026-10-25T22:00:00+00:00",
+      "end_ts": "2026-10-25T22:00:27+00:00",
+      "duration_s": 27,
+      "label": "pet",
+      "source_entity_id": "binary_sensor.driveway_dog_occupancy",
+      "camera_name": "Driveway",
+      "snapshot_url": "driveway_pet.svg",
+      "recording": {
+        "status": "linked",
+        "local_url": "clip.mp4",
+        "start_offset_s": 5.0,
+        "clip_start_ts": "2026-10-25T21:59:55+00:00",
+        "clip_end_ts": "2026-10-25T22:00:27+00:00",
+        "resolved_at": "2026-10-26T12:00:00+00:00"
+      },
+      "frigate": {
+        "event_id": "1792965600.000000-fx0009",
+        "label": "dog",
+        "sub_label": null,
+        "score": 0.79,
+        "zones": [],
+        "camera": "driveway"
+      }
+    },
+    {
+      "id": "1792951200.000000-fx0010",
+      "start_ts": "2026-10-25T18:00:00+00:00",
+      "end_ts": "2026-10-25T18:00:06+00:00",
+      "duration_s": 6,
+      "label": "vehicle",
+      "source_entity_id": "binary_sensor.front_yard_car_occupancy",
+      "camera_name": "Front Yard",
+      "snapshot_url": "front_yard_vehicle.svg",
+      "recording": {
+        "status": "linked",
+        "local_url": "clip.mp4",
+        "start_offset_s": 5.0,
+        "clip_start_ts": "2026-10-25T17:59:55+00:00",
+        "clip_end_ts": "2026-10-25T18:00:06+00:00",
+        "resolved_at": "2026-10-26T12:00:00+00:00"
+      },
+      "frigate": {
+        "event_id": "1792951200.000000-fx0010",
+        "label": "car",
+        "sub_label": null,
+        "score": 0.92,
+        "zones": [
+          "street"
+        ],
+        "camera": "front_yard"
+      }
+    },
+    {
+      "id": "1792936800.000000-fx0011",
+      "start_ts": "2026-10-25T14:00:00+00:00",
+      "end_ts": "2026-10-25T14:00:44+00:00",
+      "duration_s": 44,
+      "label": "person",
+      "source_entity_id": "binary_sensor.driveway_person_occupancy",
+      "camera_name": "Driveway",
+      "snapshot_url": "driveway_person.svg",
+      "recording": {
+        "status": "linked",
+        "local_url": "clip.mp4",
+        "start_offset_s": 5.0,
+        "clip_start_ts": "2026-10-25T13:59:55+00:00",
+        "clip_end_ts": "2026-10-25T14:00:44+00:00",
+        "resolved_at": "2026-10-26T12:00:00+00:00"
+      },
+      "frigate": {
+        "event_id": "1792936800.000000-fx0011",
+        "label": "person",
+        "sub_label": null,
+        "score": 0.87,
+        "zones": [],
+        "camera": "driveway"
+      }
+    }
+  ],
+  "enabled_labels": [
+    "person",
+    "pet",
+    "vehicle"
+  ],
+  "retention_hours": 24
+}
