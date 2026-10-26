@@ -337,7 +337,10 @@ class FrigateFeedMediaView(HomeAssistantView):
 
         session = async_get_clientsession(self.hass, verify_ssl=verify_ssl)
         range_header = request.headers.get(hdrs.RANGE)
-        if kind == MEDIA_KIND_CLIP and range_header and hdrs.IF_RANGE not in request.headers:
+        # Browsers send If-Range with the ETag/Last-Modified of the buffered file on
+        # follow-up range requests; FileResponse evaluates it, so those must use the
+        # buffer too (passing them upstream returns a full 200 and the player restarts).
+        if kind == MEDIA_KIND_CLIP and range_header:
             cache_key = f"{base_url}|{cache_id}"
             return await self._async_serve_clip_range(request, session, upstream_url, headers, cache_key)
         return await self._async_proxy(request, session, upstream_url, params, headers)
@@ -434,7 +437,7 @@ class FrigateFeedReviewMediaView(FrigateFeedMediaView):
                 cached = self._clip_cache.get(f"{source.base_url}|{cache_id}")
             except Exception:  # noqa: BLE001 - source not ready behaves like unavailable
                 cached = None
-            if cached is not None and hdrs.IF_RANGE not in request.headers:
+            if cached is not None:
                 return cached.response()
         review = await source.async_get_review(review_id)
         if review is None:
