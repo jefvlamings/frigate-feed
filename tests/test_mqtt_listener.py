@@ -84,6 +84,10 @@ def signals(hass: HomeAssistant) -> list[dict[str, Any]]:
     return received
 
 
+def _topics(mqtt_mock) -> set[str]:
+    return {call.args[0] for call in mqtt_mock.async_subscribe.call_args_list}
+
+
 async def _advance(hass: HomeAssistant, seconds: float = MQTT_DEBOUNCE_SECONDS + 0.1) -> None:
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=seconds))
     await hass.async_block_till_done()
@@ -96,7 +100,7 @@ async def test_new_and_end_dispatch(
     manager = FakeManager()
     unsub = await async_setup_mqtt_listener(hass, FakeSource(), manager)
     mqtt_mock.async_subscribe.assert_called()
-    assert mqtt_mock.async_subscribe.call_args[0][0] == "frigate/events"
+    assert {"frigate/events", "frigate/reviews"} <= _topics(mqtt_mock)
 
     async_fire_mqtt_message(hass, "frigate/events", _payload(event_type, label="dog"))
     await hass.async_block_till_done()
@@ -169,7 +173,7 @@ async def test_custom_topic_prefix(
 ) -> None:
     manager = FakeManager()
     unsub = await async_setup_mqtt_listener(hass, FakeSource("nvr"), manager)
-    assert mqtt_mock.async_subscribe.call_args[0][0] == "nvr/events"
+    assert {"nvr/events", "nvr/reviews"} <= _topics(mqtt_mock)
 
     async_fire_mqtt_message(hass, "frigate/events", _payload("new"))
     await hass.async_block_till_done()
@@ -215,3 +219,78 @@ async def test_mqtt_unavailable_returns_noop(
     await _advance(hass)
     assert signals == []
     assert manager.invalidations == 0
+
+
+def _review(
+    review_type: str,
+    before_detections: list[str] | None,
+    after_detections: list[str],
+    objects: list[str],
+    camera: str = "test_cam",
+) -> str:
+    """Hand-made `<prefix>/reviews` payload shaped like Frigate 0.14+."""
+
+    def _item(detections: list[str]) -> dict[str, Any]:
+        return {
+            "id": "1700000000.0-rev001",
+            "camera": camera,
+            "start_time": 1700000000.0,
+            "end_time": None,
+            "severity": "alert",
+            "thumb_path": "/media/frigate/clips/review/thumb.webp",
+            "data": {"detections": detections, "objects": objects, "sub_labels": [], "zones": ["test_zone"], "audio": []},
+        }
+
+    payload: dict[str, Any] = {"type": review_type, "after": _item(after_detections)}
+    payload["before"] = _item(before_detections) if before_detections is not None else _item(after_detections)
+    return json.dumps(payload)
+
+
+async def test_review_new_dispatches(
+    hass: HomeAssistant, mqtt_mock, signals: list[dict[str, Any]]
+) -> None:
+    manager = FakeManager()
+    unsub = await async_setup_mqtt_listener(hass, FakeSource(), manager)
+    async_fire_mqtt_message(hass, "frigate/reviews", _review("new", None, ["1700000000.0-abc123"], ["person"]))
+    await hass.async_block_till_done()
+    await _advance(hass)
+    assert signals == [
+        {"type": "review", "event_id": "1700000000.0-abc123", "camera": "test_cam", "label": "person"}
+    ]
+    assert manager.invalidations == 1
+    unsub()
+
+
+async def test_review_update_only_when_detection_added(
+    hass: HomeAssistant, mqtt_mock, signals: list[dict[str, Any]]
+) -> None:
+    manager = FakeManager()
+    unsub = await async_setup_mqtt_listener(hass, FakeSource(), manager)
+    first = "1700000000.0-abc123"
+    second = "1700000005.0-def456"
+    # Same detections (e.g. thumbnail/zone change): ignored.
+    async_fire_mqtt_message(hass, "frigate/reviews", _review("update", [first], [first], ["person"]))
+    await hass.async_block_till_done()
+    await _advance(hass)
+    assert signals == []
+    # A second object qualified: refresh, pointing at the added event.
+    async_fire_mqtt_message(hass, "frigate/reviews", _review("update", [first], [first, second], ["person", "dog"]))
+    await hass.async_block_till_done()
+    await _advance(hass)
+    assert signals == [{"type": "review", "event_id": second, "camera": "test_cam", "label": "person"}]
+    unsub()
+
+
+async def test_review_ignored_for_end_and_unmapped_objects(
+    hass: HomeAssistant, mqtt_mock, signals: list[dict[str, Any]]
+) -> None:
+    manager = FakeManager()
+    unsub = await async_setup_mqtt_listener(hass, FakeSource(), manager)
+    async_fire_mqtt_message(hass, "frigate/reviews", _review("end", ["a"], ["a"], ["person"]))
+    async_fire_mqtt_message(hass, "frigate/reviews", _review("new", None, ["b"], ["package"]))
+    async_fire_mqtt_message(hass, "frigate/reviews", "not json")
+    await hass.async_block_till_done()
+    await _advance(hass)
+    assert signals == []
+    assert manager.invalidations == 0
+    unsub()
