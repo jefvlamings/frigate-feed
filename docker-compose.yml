@@ -1,0 +1,67 @@
+# Dev stack for frigate_feed. ALWAYS run with the project name:
+#   docker compose -p frigate-feed-dev up -d
+# This machine also runs production home-assistant / frigate / mosquitto containers:
+# this stack uses its own bridge network, distinct container names and never binds
+# host ports 8123, 1883, 5000 or 8971.
+name: frigate-feed-dev
+
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:2026.10.4
+    container_name: frigate-feed-dev-ha
+    ports:
+      - "8124:8123"
+    volumes:
+      - ./config:/config
+      - ./custom_components/frigate_feed:/config/custom_components/frigate_feed
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - TZ=Europe/Brussels
+    depends_on:
+      - mosquitto-dev
+      - frigate-dev
+    networks:
+      - dev
+    restart: unless-stopped
+
+  frigate-dev:
+    image: ghcr.io/blakeblackshear/frigate:0.18.2
+    container_name: frigate-feed-dev-frigate
+    shm_size: 256mb
+    volumes:
+      - ./dev/frigate/config.yml:/config/config.yml
+      - ./dev/frigate/storage:/media/frigate
+      - ./dev/media:/media/dev:ro
+      - /etc/localtime:/etc/localtime:ro
+      - type: tmpfs
+        target: /tmp/cache
+        tmpfs:
+          size: 512000000
+    environment:
+      - TZ=Europe/Brussels
+      # The fake cameras use go2rtc `exec:` sources (looping local clips); dev only.
+      - GO2RTC_ALLOW_ARBITRARY_EXEC=true
+    # No published ports: HA reaches it at http://frigate-dev:5000 on the bridge network.
+    # For debugging the Frigate UI, uncomment (loopback only, never 5000/8971 on the host):
+    # ports:
+    #   - "127.0.0.1:5001:5000"
+    depends_on:
+      - mosquitto-dev
+    networks:
+      - dev
+    restart: unless-stopped
+
+  mosquitto-dev:
+    image: eclipse-mosquitto:2
+    container_name: frigate-feed-dev-mosquitto
+    volumes:
+      - ./dev/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    # No published ports (production mosquitto owns host :1883).
+    networks:
+      - dev
+    restart: unless-stopped
+
+networks:
+  dev:
+    name: frigate-feed-dev
+    driver: bridge

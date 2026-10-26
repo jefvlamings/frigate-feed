@@ -18,3 +18,9 @@ release/
 config/secrets.yaml
 dev/media/
 dev/frigate/storage/
+config/.HA_VERSION
+config/.cloud/
+config/blueprints/
+config/tts/
+config/www/
+config/custom_components/
