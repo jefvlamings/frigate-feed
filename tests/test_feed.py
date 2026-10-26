@@ -50,9 +50,15 @@ class FakeSource:
         return camera.replace("_", " ").title()
 
     def pre_capture_seconds(self, camera: str, severity: str | None = None) -> float:
+        return self._capture(camera, severity, "pre_capture")
+
+    def post_capture_seconds(self, camera: str, severity: str | None = None) -> float:
+        return self._capture(camera, severity, "post_capture")
+
+    def _capture(self, camera: str, severity: str | None, field: str) -> float:
         record = self.config.get("cameras", {}).get(camera, {}).get("record", {})
         key = "alerts" if severity == "alert" else "detections"
-        value = record.get(key, {}).get("pre_capture")
+        value = record.get(key, {}).get(field)
         return float(value) if value is not None else float(DEFAULT_PRE_CAPTURE_SECONDS)
 
     def source_entity_id(self, camera: str, frigate_label: str) -> str | None:
@@ -128,7 +134,7 @@ async def test_event_to_item_linked(hass: HomeAssistant, fake_frigate, source) -
     clip_start = datetime.fromisoformat(recording["clip_start_ts"])
     clip_end = datetime.fromisoformat(recording["clip_end_ts"])
     assert clip_start == dt_util.utc_from_timestamp(event["start_time"] - 5)
-    assert clip_end == dt_util.utc_from_timestamp(event["end_time"] + 5)
+    assert clip_end == dt_util.utc_from_timestamp(event["end_time"] + 8)  # alert post_capture
     assert datetime.fromisoformat(recording["resolved_at"]).tzinfo is not None
 
     assert item.frigate == {

@@ -68,12 +68,14 @@ def _event_recording(
     if not event.get("has_clip"):
         return {"status": "not_found"}
     camera = str(event.get("camera") or "")
-    pre_capture = float(source.pre_capture_seconds(camera, _event_data(event).get("max_severity")))
+    severity = _event_data(event).get("max_severity")
+    pre_capture = float(source.pre_capture_seconds(camera, severity))
+    post_capture = float(source.post_capture_seconds(camera, severity))
     return {
         "status": "linked",
         "local_url": MEDIA_URL.format(event_id=event["id"], kind=MEDIA_KIND_CLIP),
         "clip_start_ts": _local_iso(start - pre_capture),
-        "clip_end_ts": _local_iso(end + pre_capture),
+        "clip_end_ts": _local_iso(end + post_capture),
         "start_offset_s": pre_capture,
         "resolved_at": dt_util.now().isoformat(),
     }
