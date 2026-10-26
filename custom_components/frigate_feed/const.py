@@ -28,6 +28,9 @@ CLEANUP_INTERVAL_SECONDS = 3600
 LIST_CACHE_SECONDS = 10
 MQTT_DEBOUNCE_SECONDS = 2.0
 DEFAULT_PRE_CAPTURE_SECONDS = 5
+# Frigate writes recording segments in ~10s chunks; an event clip returns HTTP 400 until
+# the segments covering end_time + post_capture exist.
+CLIP_READY_GRACE_SECONDS = 15
 SIGNED_URL_EXPIRY = timedelta(hours=24)
 
 SIGNAL_FEED_UPDATED = "frigate_feed_updated"

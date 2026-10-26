@@ -8,17 +8,20 @@ import logging
 import time
 from typing import Any
 
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.util import dt as dt_util
 
 from .const import (
     CLEANUP_INTERVAL_SECONDS,
+    CLIP_READY_GRACE_SECONDS,
     LIST_CACHE_SECONDS,
     LIST_ITEMS_LIMIT,
     MEDIA_KIND_CLIP,
     MEDIA_KIND_SNAPSHOT,
     MEDIA_URL,
+    SIGNAL_FEED_UPDATED,
     bucket_frigate_label,
     frigate_labels_for_buckets,
 )
@@ -60,6 +63,13 @@ def _event_score(event: dict[str, Any]) -> float | None:
     return None
 
 
+def clip_ready_at(event: dict[str, Any], source: FrigateSource, end: float) -> float:
+    """Epoch time from which Frigate can serve the clip of an ended event."""
+    camera = str(event.get("camera") or "")
+    post_capture = float(source.post_capture_seconds(camera, _event_data(event).get("max_severity")))
+    return end + post_capture + CLIP_READY_GRACE_SECONDS
+
+
 def _event_recording(
     event: dict[str, Any], source: FrigateSource, start: float, end: float | None
 ) -> dict[str, Any]:
@@ -67,6 +77,8 @@ def _event_recording(
         return {"status": "pending"}
     if not event.get("has_clip"):
         return {"status": "not_found"}
+    if time.time() < clip_ready_at(event, source, end):
+        return {"status": "pending"}
     camera = str(event.get("camera") or "")
     severity = _event_data(event).get("max_severity")
     pre_capture = float(source.pre_capture_seconds(camera, severity))
@@ -101,8 +113,9 @@ def event_to_item(event: dict[str, Any], source: FrigateSource) -> DetectionItem
     - snapshot_url = MEDIA_URL(kind=snapshot.jpg) when has_snapshot, else None
     - recording:
         end_time is None              -> {"status": "pending"}
-        ended and has_clip            -> {"status": "linked", "local_url": MEDIA_URL(kind=clip.mp4),
+        ended, has_clip, clip ready   -> {"status": "linked", "local_url": MEDIA_URL(kind=clip.mp4),
                                           "clip_start_ts", "clip_end_ts", "start_offset_s", "resolved_at"}
+        ended, has_clip, not ready    -> {"status": "pending"} (until clip_ready_at)
         ended without clip            -> {"status": "not_found"}
       start_offset_s = source.pre_capture_seconds(camera, event["data"].get("max_severity"))
     - frigate = {"event_id", "label", "sub_label", "score", "zones", "camera"}
@@ -163,6 +176,8 @@ class FrigateFeedManager:
         # (monotonic fetched_at, query limit, raw events newest-first)
         self._cache: tuple[float, int, list[dict[str, Any]]] | None = None
         self._unsub_cleanup: Callable[[], None] | None = None
+        # event_id -> cancel callback of the timer that announces its clip is ready
+        self._clip_ready_timers: dict[str, Callable[[], None]] = {}
 
     async def async_start(self) -> None:
         """Load hidden ids and schedule the hourly hidden-id prune."""
@@ -178,6 +193,9 @@ class FrigateFeedManager:
         if self._unsub_cleanup is not None:
             self._unsub_cleanup()
             self._unsub_cleanup = None
+        for cancel in self._clip_ready_timers.values():
+            cancel()
+        self._clip_ready_timers.clear()
         self.invalidate_cache()
 
     def get_enabled_labels(self) -> set[str]:
@@ -209,6 +227,7 @@ class FrigateFeedManager:
             item = event_to_item(event, self.source)
             if item is None or item.label not in wanted:
                 continue
+            self._schedule_clip_ready(event, item)
             items.append(item)
         items.sort(key=lambda item: item.start_dt, reverse=True)
         return items[:cap]
@@ -260,6 +279,29 @@ class FrigateFeedManager:
         )
         self._cache = (now, limit, events)
         return events
+
+    def _schedule_clip_ready(self, event: dict[str, Any], item: DetectionItem) -> None:
+        """Announce a feed update once an ended event's clip becomes available."""
+        end = _as_float(event.get("end_time"))
+        if end is None or not event.get("has_clip") or item.recording.get("status") != "pending":
+            return
+        if item.id in self._clip_ready_timers:
+            return
+        delay = max(clip_ready_at(event, self.source, end) - time.time(), 0.0) + 1.0
+        payload = {
+            "type": "clip_ready",
+            "event_id": item.id,
+            "camera": str(event.get("camera") or ""),
+            "label": item.label,
+        }
+
+        @callback
+        def _announce(_now: datetime) -> None:
+            self._clip_ready_timers.pop(item.id, None)
+            self.invalidate_cache()
+            async_dispatcher_send(self.hass, SIGNAL_FEED_UPDATED, payload)
+
+        self._clip_ready_timers[item.id] = async_call_later(self.hass, delay, _announce)
 
     def _cached_event(self, item_id: str) -> dict[str, Any] | None:
         if self._cache is None:
