@@ -8,17 +8,21 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from http import HTTPStatus
 import logging
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import re
+import shutil
+import tempfile
 import time
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
+import uuid
 
 import aiohttp
 from aiohttp import hdrs, web
+from yarl import URL
 
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.components.http.auth import async_sign_path
+from homeassistant.components.http.auth import SAFE_QUERY_PARAMS, async_sign_path
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -44,7 +48,7 @@ DATA_CLIP_CACHE = f"{DOMAIN}_clip_cache"
 MEDIA_PATH_PREFIX = "/api/frigate_feed/media/"
 
 EVENT_ID_RE = re.compile(r"^[0-9]+\.[0-9]+-[a-z0-9]+$", re.IGNORECASE)
-SNAPSHOT_QUERY_PARAMS: tuple[str, ...] = ("height", "quality")
+SNAPSHOT_QUERY_PARAMS: tuple[str, ...] = ("height", "quality", "crop", "bbox")
 _SAFE_PARAM_VALUE_RE = re.compile(r"^[0-9]{1,5}$")
 
 FORWARDED_REQUEST_HEADERS: tuple[str, ...] = (
@@ -69,17 +73,16 @@ PASSTHROUGH_STATUSES: frozenset[int] = frozenset(
 UPSTREAM_TIMEOUT = aiohttp.ClientTimeout(total=None, connect=10, sock_read=60)
 CHUNK_SIZE = 64 * 1024
 
-# Frigate (0.14-0.16) builds clip.mp4 on the fly and answers 200 with chunked
-# encoding, ignoring Range. Browsers need 206 responses to seek (Safari/iOS will
-# not play the clip at all without them), so when a client asks for a range and
-# upstream ignores it, the clip is buffered in a small, short-lived memory cache
-# and ranges are served from there.
-CLIP_CACHE_MAX_CLIP_BYTES = 64 * 1024 * 1024
-CLIP_CACHE_MAX_TOTAL_BYTES = 128 * 1024 * 1024
+# Frigate builds clip.mp4 on the fly as a fragmented MP4 (no duration in its header)
+# and answers 200 with chunked encoding, ignoring Range. Browsers need 206 responses
+# to learn the duration and to seek (Safari/iOS will not play the clip at all without
+# them), so when a client asks for a range and upstream ignores it, the clip is
+# downloaded once into a short-lived temporary file and ranges are served from there.
+CLIP_CACHE_MAX_CLIP_BYTES = 512 * 1024 * 1024
+CLIP_CACHE_MAX_TOTAL_BYTES = 1024 * 1024 * 1024
 CLIP_CACHE_TTL_SECONDS = 300.0
-
-_RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
-
+CLIP_CACHE_DIR_NAME = "frigate_feed_clips"
+DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 
 def async_register_media_views(
     hass: HomeAssistant, get_source: Callable[[], FrigateSource | None]
@@ -104,15 +107,15 @@ def async_register_media_views(
 
 
 def sign_item_urls(hass: HomeAssistant, item: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of an item dict with snapshot_url and recording.local_url signed.
+    """Return a copy of an item dict with snapshot_url, thumbnail_url and recording.local_url signed.
 
     Must be called while handling a websocket command so async_sign_path can bind
     the signature to the current connection's refresh token. Uses SIGNED_URL_EXPIRY.
     """
     signed = dict(item)
-    snapshot_url = signed.get("snapshot_url")
-    if _is_media_path(snapshot_url):
-        signed["snapshot_url"] = _sign_path(hass, snapshot_url)
+    for key in ("snapshot_url", "thumbnail_url"):
+        if _is_media_path(url := signed.get(key)):
+            signed[key] = _sign_path(hass, url)
     recording = signed.get("recording")
     if isinstance(recording, dict):
         recording = signed["recording"] = dict(recording)
@@ -133,12 +136,17 @@ def _sign_path(hass: HomeAssistant, path: str) -> str:
     websocket command) or the current HTTP request to pick the refresh token, and
     falls back to HA's read-only content user. It only fails when the http
     component's auth has not been set up; then the unsigned path is returned.
+
+    async_sign_path leaves SAFE_QUERY_PARAMS (height, width) out of both the signature
+    and the returned URL, since clients may change them; they are appended again.
     """
     try:
-        return async_sign_path(hass, path, SIGNED_URL_EXPIRY)
+        signed = async_sign_path(hass, path, SIGNED_URL_EXPIRY)
     except KeyError:
         _LOGGER.debug("Cannot sign %s: HTTP auth not set up; returning unsigned path", path)
         return path
+    safe = [(key, value) for key, value in URL(path).query.items() if key in SAFE_QUERY_PARAMS]
+    return f"{signed}&{urlencode(safe)}" if safe else signed
 
 
 def is_valid_event_id(event_id: str) -> bool:
@@ -155,53 +163,50 @@ def _snapshot_params(request: web.Request) -> dict[str, str]:
     return params
 
 
-def _parse_single_range(value: str, size: int) -> tuple[int, int] | None:
-    """Parse a single `bytes=` range into inclusive (start, end) bounds.
-
-    Returns None for unsupported/malformed headers (served as a full 200) and
-    raises ValueError when the range cannot be satisfied for `size`.
-    """
-    match = _RANGE_RE.fullmatch(value.strip())
-    if match is None:
-        return None
-    first, last = match.groups()
-    if not first and not last:
-        return None
-    if not first:
-        suffix = int(last)
-        if suffix == 0 or size == 0:
-            raise ValueError("unsatisfiable range")
-        return max(size - suffix, 0), size - 1
-    start = int(first)
-    end = int(last) if last else size - 1
-    if start >= size:
-        raise ValueError("unsatisfiable range")
-    if end < start:
-        return None
-    return start, min(end, size - 1)
-
-
 @dataclass
 class _CachedClip:
-    data: bytes
+    path: Path
+    size: int
     content_type: str
     expires: float
 
+    def response(self) -> web.FileResponse:
+        """Serve the clip; FileResponse answers Range/If-Range with 206/416 itself."""
+        return web.FileResponse(
+            self.path,
+            chunk_size=CHUNK_SIZE,
+            headers={hdrs.CACHE_CONTROL: "no-store", hdrs.CONTENT_TYPE: self.content_type},
+        )
+
+
+class _ClipTooLarge(Exception):
+    """The clip exceeded CLIP_CACHE_MAX_CLIP_BYTES while downloading."""
+
+
+def _reset_dir(directory: Path) -> None:
+    shutil.rmtree(directory, ignore_errors=True)
+    directory.mkdir(parents=True, exist_ok=True)
+
+
+def _unlink(path: Path) -> None:
+    path.unlink(missing_ok=True)
+
 
 class _ClipCache:
-    """Tiny LRU cache with sliding TTL for clips whose upstream ignores Range.
+    """LRU cache of clip files with a sliding TTL, for clips whose upstream ignores Range.
 
-    `lock` serializes buffering downloads across all clips, so at most one clip is
-    held in memory outside the cache (bounding memory to the per-clip limit plus
-    CLIP_CACHE_MAX_TOTAL_BYTES) and concurrent range requests for the same
-    uncached clip trigger a single download.
+    Files live in a temporary directory that is emptied at setup and on stop. `lock`
+    serializes downloads, so concurrent range requests for the same uncached clip
+    trigger a single download.
     """
 
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
         self.lock = asyncio.Lock()
+        self.directory = Path(tempfile.gettempdir()) / CLIP_CACHE_DIR_NAME
         self._items: OrderedDict[str, _CachedClip] = OrderedDict()
         self._cancel_timer: CALLBACK_TYPE | None = None
+        self._ready: asyncio.Future[None] | None = None
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._async_on_stop)
 
     def get(self, key: str) -> _CachedClip | None:
@@ -213,28 +218,56 @@ class _ClipCache:
             self._items.move_to_end(key)
         return clip
 
-    def put(self, key: str, data: bytes, content_type: str) -> _CachedClip:
+    async def async_store(
+        self, key: str, content: aiohttp.StreamReader, content_type: str
+    ) -> _CachedClip:
+        """Download `content` into a new clip file. Raises _ClipTooLarge."""
+        if self._ready is None:
+            self._ready = self.hass.async_add_executor_job(_reset_dir, self.directory)
+        await self._ready
+        path = self.directory / f"{uuid.uuid4().hex}.mp4"
+        file = await self.hass.async_add_executor_job(path.open, "wb")
+        size = 0
+        try:
+            async for chunk in content.iter_chunked(DOWNLOAD_CHUNK_SIZE):
+                size += len(chunk)
+                if size > CLIP_CACHE_MAX_CLIP_BYTES:
+                    raise _ClipTooLarge
+                await self.hass.async_add_executor_job(file.write, chunk)
+        except BaseException:
+            await self.hass.async_add_executor_job(file.close)
+            await self.hass.async_add_executor_job(_unlink, path)
+            raise
+        await self.hass.async_add_executor_job(file.close)
         self._expire()
-        clip = _CachedClip(data, content_type, time.monotonic() + CLIP_CACHE_TTL_SECONDS)
-        self._items.pop(key, None)
+        clip = _CachedClip(path, size, content_type, time.monotonic() + CLIP_CACHE_TTL_SECONDS)
+        if (old := self._items.pop(key, None)) is not None:
+            self._discard(old)
         self._items[key] = clip
-        total = sum(len(item.data) for item in self._items.values())
+        total = sum(item.size for item in self._items.values())
         while total > CLIP_CACHE_MAX_TOTAL_BYTES and len(self._items) > 1:
             _, evicted = self._items.popitem(last=False)
-            total -= len(evicted.data)
+            total -= evicted.size
+            self._discard(evicted)
         self._schedule_purge()
         return clip
 
     def clear(self) -> None:
+        for clip in self._items.values():
+            self._discard(clip)
         self._items.clear()
         if self._cancel_timer is not None:
             self._cancel_timer()
             self._cancel_timer = None
 
+    def _discard(self, clip: _CachedClip) -> None:
+        # A response still streaming the file keeps its open descriptor after unlink.
+        self.hass.async_add_executor_job(_unlink, clip.path)
+
     def _expire(self) -> None:
         now = time.monotonic()
         for key in [key for key, item in self._items.items() if item.expires <= now]:
-            del self._items[key]
+            self._discard(self._items.pop(key))
 
     def _schedule_purge(self) -> None:
         if self._cancel_timer is not None or not self._items:
@@ -306,9 +339,7 @@ class FrigateFeedMediaView(HomeAssistantView):
         range_header = request.headers.get(hdrs.RANGE)
         if kind == MEDIA_KIND_CLIP and range_header and hdrs.IF_RANGE not in request.headers:
             cache_key = f"{base_url}|{cache_id}"
-            return await self._async_serve_clip_range(
-                request, session, upstream_url, headers, cache_key, range_header
-            )
+            return await self._async_serve_clip_range(request, session, upstream_url, headers, cache_key)
         return await self._async_proxy(request, session, upstream_url, params, headers)
 
     async def _async_proxy(
@@ -337,49 +368,47 @@ class FrigateFeedMediaView(HomeAssistantView):
         url: str,
         headers: dict[str, str],
         cache_key: str,
-        range_header: str,
     ) -> web.StreamResponse:
-        """Serve a byte range of a clip, buffering when upstream ignores Range.
+        """Serve a byte range of a clip, buffering it to disk when upstream ignores Range.
 
-        The buffering lock is released before anything is streamed through, so a
-        long passthrough never blocks other range requests.
+        The download lock is released before anything is streamed through, so a long
+        passthrough never blocks other range requests.
         """
         cache = self._clip_cache
         if (clip := cache.get(cache_key)) is not None:
-            return _range_response(clip, range_header)
+            return clip.response()
         await cache.lock.acquire()
         locked = True
         try:
             if (clip := cache.get(cache_key)) is not None:
-                return _range_response(clip, range_header)
+                return clip.response()
             try:
                 async with session.get(url, headers=headers, timeout=UPSTREAM_TIMEOUT) as upstream:
                     if (error := _map_upstream_status(upstream.status, url)) is not None:
                         return error
+                    length = upstream.headers.get(hdrs.CONTENT_LENGTH, "")
                     if (
                         upstream.status != HTTPStatus.OK
                         or hdrs.CONTENT_RANGE in upstream.headers
                         or hdrs.CONTENT_ENCODING in upstream.headers
+                        or (length.isdigit() and int(length) > CLIP_CACHE_MAX_CLIP_BYTES)
                     ):
-                        # Upstream honours Range (or answered 304/416): pass through.
+                        # Upstream honours Range (or answered 304/416), or the clip is
+                        # too large to buffer: pass through.
                         cache.lock.release()
                         locked = False
                         return await _async_stream_upstream(request, upstream)
-                    # The mocked client in tests returns a fresh stream per access.
-                    content = upstream.content
-                    body, complete = await _async_read_limited(
-                        upstream, content, CLIP_CACHE_MAX_CLIP_BYTES
-                    )
-                    if not complete:
-                        cache.lock.release()
-                        locked = False
-                        return await _async_stream_upstream(request, upstream, body, content)
                     content_type = upstream.headers.get(hdrs.CONTENT_TYPE, "video/mp4")
+                    clip = await cache.async_store(cache_key, upstream.content, content_type)
+            except _ClipTooLarge:
+                _LOGGER.debug("Clip %s exceeds the buffer limit; streaming without Range", url)
+                cache.lock.release()
+                locked = False
+                return await self._async_proxy(request, session, url, {}, headers)
             except (aiohttp.ClientError, TimeoutError) as err:
                 _LOGGER.debug("Frigate clip request %s failed: %s", url, err)
                 return web.Response(status=HTTPStatus.BAD_GATEWAY)
-            clip = cache.put(cache_key, body, content_type)
-            return _range_response(clip, range_header)
+            return clip.response()
         finally:
             if locked:
                 cache.lock.release()
@@ -399,14 +428,14 @@ class FrigateFeedReviewMediaView(FrigateFeedMediaView):
         if source is None:
             return web.Response(status=HTTPStatus.NOT_FOUND)
         cache_id = f"review|{review_id}"
-        if kind == MEDIA_KIND_CLIP and (range_header := request.headers.get(hdrs.RANGE)):
+        if kind == MEDIA_KIND_CLIP and request.headers.get(hdrs.RANGE):
             # Seeking re-requests ranges; serve buffered clips without a review lookup.
             try:
                 cached = self._clip_cache.get(f"{source.base_url}|{cache_id}")
             except Exception:  # noqa: BLE001 - source not ready behaves like unavailable
                 cached = None
             if cached is not None and hdrs.IF_RANGE not in request.headers:
-                return _range_response(cached, range_header)
+                return cached.response()
         review = await source.async_get_review(review_id)
         if review is None:
             return web.Response(status=HTTPStatus.NOT_FOUND)
@@ -453,23 +482,6 @@ def _map_upstream_status(status: int, url: str) -> web.Response | None:
     return None
 
 
-async def _async_read_limited(
-    upstream: aiohttp.ClientResponse, content: aiohttp.StreamReader, limit: int
-) -> tuple[bytes, bool]:
-    """Read the upstream body up to `limit` bytes; return (data, reached_eof)."""
-    length = upstream.headers.get(hdrs.CONTENT_LENGTH)
-    if length is not None and length.isdigit() and int(length) > limit:
-        return b"", False
-    chunks: list[bytes] = []
-    size = 0
-    async for chunk in content.iter_chunked(CHUNK_SIZE):
-        chunks.append(chunk)
-        size += len(chunk)
-        if size > limit:
-            return b"".join(chunks), False
-    return b"".join(chunks), True
-
-
 async def _async_stream_upstream(
     request: web.Request,
     upstream: aiohttp.ClientResponse,
@@ -503,24 +515,3 @@ async def _async_stream_upstream(
         if request.transport is not None:
             request.transport.close()
     return response
-
-
-def _range_response(clip: _CachedClip, range_header: str) -> web.Response:
-    """Build a 206/200/416 response for a cached clip."""
-    size = len(clip.data)
-    headers = {
-        hdrs.ACCEPT_RANGES: "bytes",
-        hdrs.CACHE_CONTROL: "no-store",
-        hdrs.CONTENT_TYPE: clip.content_type,
-    }
-    try:
-        bounds = _parse_single_range(range_header, size)
-    except ValueError:
-        headers.pop(hdrs.CONTENT_TYPE)
-        headers[hdrs.CONTENT_RANGE] = f"bytes */{size}"
-        return web.Response(status=HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE, headers=headers)
-    if bounds is None:
-        return web.Response(status=HTTPStatus.OK, body=clip.data, headers=headers)
-    start, end = bounds
-    headers[hdrs.CONTENT_RANGE] = f"bytes {start}-{end}/{size}"
-    return web.Response(status=HTTPStatus.PARTIAL_CONTENT, body=clip.data[start : end + 1], headers=headers)

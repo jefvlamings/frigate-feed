@@ -7,6 +7,8 @@ from typing import Any
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from yarl import URL
+
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -119,6 +121,20 @@ async def test_list_resolve_delete_and_media(
     assert resp.headers["Content-Type"].startswith("image/jpeg")
     unsigned = await http.get(snapshot_url.split("?", 1)[0])
     assert unsigned.status == 401
+
+    # The object thumbnail is the same snapshot, cropped by Frigate; the signature covers
+    # the crop parameters, which are forwarded upstream.
+    thumbnail_url = ended["thumbnail_url"]
+    assert thumbnail_url.startswith(f"/api/frigate_feed/media/{event_id}/snapshot.jpg?")
+    assert {"crop": "1", "bbox": "0", "height": "400", "quality": "80"}.items() <= dict(
+        URL(thumbnail_url).query
+    ).items()
+    resp = await http.get(thumbnail_url)
+    assert resp.status == 200
+    upstream_url = aioclient_mock.mock_calls[-1][1]
+    assert dict(upstream_url.query) == {"crop": "1", "bbox": "0", "height": "400", "quality": "80"}
+    tampered = thumbnail_url.replace("crop=1", "crop=0")
+    assert (await http.get(tampered)).status == 401
 
     # The review clip is the camera recording over the review window plus pre/post capture.
     review = next(review for review in fake_frigate.reviews if review["id"] == ended["id"])

@@ -27,6 +27,7 @@ class DetectionItem:
     snapshot_url: str | None
     recording: dict[str, Any]
     frigate: dict[str, Any] | None = None
+    thumbnail_url: str | None = None
     labels: list[str] = field(default_factory=list)
     detections: list[dict[str, Any]] = field(default_factory=list)
 
@@ -54,6 +55,7 @@ class DetectionItem:
             snapshot_url=data.get("snapshot_url"),
             recording=data.get("recording", {"status": "pending"}),
             frigate=data.get("frigate"),
+            thumbnail_url=data.get("thumbnail_url"),
             labels=list(data["labels"]) if "labels" in data else [data["label"]],
             detections=list(data.get("detections") or []),
         )
