@@ -95,6 +95,12 @@ Items keep the reolink-feed shape (`id`, `start_ts`, `end_ts`, `duration_s`, `la
 `/api/frigate_feed/media/review/{review_id}/clip.mp4`: the camera recording over the review
 window plus the camera's pre/post capture.
 
+Frigate serves clips as fragmented MP4 without byte-range support, which browsers need to
+know the clip length and to seek. When a browser asks for a range, the proxy downloads the clip
+once into a temporary file in the Home Assistant container (`/tmp/frigate_feed_clips`, up to
+512 MB per clip and 1 GB in total, removed 5 minutes after the last request and on restart) and
+serves ranges from there. Long clips therefore take a few seconds before they start playing.
+
 ## Development
 
 ### Dev stack

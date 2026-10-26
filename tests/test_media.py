@@ -16,6 +16,7 @@ import voluptuous as vol
 from yarl import URL
 
 from homeassistant.components import websocket_api
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
@@ -80,6 +81,13 @@ class SourceHolder:
 
     def __call__(self) -> FakeSource | None:
         return self.source
+
+
+@pytest.fixture(autouse=True)
+def clip_dir(tmp_path, monkeypatch) -> Any:
+    """Keep clip files of each test in its own temporary directory."""
+    monkeypatch.setattr(media.tempfile, "gettempdir", lambda: str(tmp_path))
+    return tmp_path / media.CLIP_CACHE_DIR_NAME
 
 
 @pytest.fixture
@@ -273,9 +281,9 @@ async def test_range_served_from_buffer_when_upstream_ignores_it(
     assert resp.status == HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE
     assert resp.headers["Content-Range"] == f"bytes */{size}"
 
+    # Multiple ranges are not supported by aiohttp's FileResponse (browsers never ask).
     resp = await client.get(CLIP_PATH, headers={"Range": "bytes=0-1,5-6"})
-    assert resp.status == HTTPStatus.OK
-    assert await resp.read() == CLIP_BYTES
+    assert resp.status == HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE
 
     # The clip was only downloaded once.
     assert aioclient_mock.call_count == 1
@@ -292,21 +300,6 @@ async def test_oversized_clip_streams_full_body(
     assert resp.status == HTTPStatus.OK
     assert await resp.read() == CLIP_BYTES
     assert "Content-Range" not in resp.headers
-
-
-def test_parse_single_range() -> None:
-    parse = media._parse_single_range
-    assert parse("bytes=0-9", 100) == (0, 9)
-    assert parse("bytes=90-200", 100) == (90, 99)
-    assert parse("bytes=-200", 100) == (0, 99)
-    assert parse("bytes=5-", 100) == (5, 99)
-    assert parse("bytes=9-5", 100) is None
-    assert parse("bytes=-", 100) is None
-    assert parse("items=0-1", 100) is None
-    with pytest.raises(ValueError):
-        parse("bytes=100-", 100)
-    with pytest.raises(ValueError):
-        parse("bytes=-0", 100)
 
 
 def test_sign_item_urls_without_http(hass: HomeAssistant) -> None:
@@ -410,20 +403,57 @@ async def test_content_length_dropped_for_encoded_upstream(
 
 
 async def test_cached_clip_purged_after_ttl(
-    hass: HomeAssistant, holder: SourceHolder, hass_client, aioclient_mock
+    hass: HomeAssistant, holder: SourceHolder, hass_client, aioclient_mock, clip_dir
 ) -> None:
     aioclient_mock.get(UPSTREAM_CLIP, content=CLIP_BYTES, headers={"Content-Type": "video/mp4"})
     client = await hass_client()
     resp = await client.get(CLIP_PATH, headers={"Range": "bytes=0-1"})
     assert resp.status == HTTPStatus.PARTIAL_CONTENT
     cache = hass.data[media.DATA_CLIP_CACHE]
-    assert cache._items
+    (clip,) = cache._items.values()
+    assert clip.path.parent == clip_dir
+    assert clip.path.read_bytes() == CLIP_BYTES
 
     later = time.monotonic() + media.CLIP_CACHE_TTL_SECONDS + 5
     with patch.object(media.time, "monotonic", return_value=later):
         async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=media.CLIP_CACHE_TTL_SECONDS + 5))
         await hass.async_block_till_done()
     assert not cache._items
+    assert not clip.path.exists()
+
+
+async def test_clip_files_evicted_over_total_limit_and_removed_on_stop(
+    hass: HomeAssistant, holder: SourceHolder, hass_client, aioclient_mock, monkeypatch, clip_dir
+) -> None:
+    monkeypatch.setattr(media, "CLIP_CACHE_MAX_TOTAL_BYTES", len(CLIP_BYTES) + 10)
+    aioclient_mock.get(UPSTREAM_CLIP, content=CLIP_BYTES, headers={"Content-Type": "video/mp4"})
+    aioclient_mock.get(UPSTREAM_REVIEW_CLIP, content=CLIP_BYTES, headers={"Content-Type": "video/mp4"})
+    client = await hass_client()
+    assert (await client.get(CLIP_PATH, headers={"Range": "bytes=0-1"})).status == HTTPStatus.PARTIAL_CONTENT
+    cache = hass.data[media.DATA_CLIP_CACHE]
+    (first,) = cache._items.values()
+    assert (await client.get(REVIEW_CLIP_PATH, headers={"Range": "bytes=0-1"})).status == HTTPStatus.PARTIAL_CONTENT
+    await hass.async_block_till_done()
+    (second,) = cache._items.values()
+    assert not first.path.exists()
+    assert second.path.exists()
+
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+    await hass.async_block_till_done()
+    assert not cache._items
+    assert not second.path.exists()
+
+
+async def test_stale_clip_files_removed_on_first_download(
+    hass: HomeAssistant, holder: SourceHolder, hass_client, aioclient_mock, clip_dir
+) -> None:
+    clip_dir.mkdir(parents=True, exist_ok=True)
+    stale = clip_dir / "left-over.mp4"
+    stale.write_bytes(b"old")
+    aioclient_mock.get(UPSTREAM_CLIP, content=CLIP_BYTES, headers={"Content-Type": "video/mp4"})
+    client = await hass_client()
+    assert (await client.get(CLIP_PATH, headers={"Range": "bytes=0-1"})).status == HTTPStatus.PARTIAL_CONTENT
+    assert not stale.exists()
 
 
 async def test_review_clip_proxies_recording_window(

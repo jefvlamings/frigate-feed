@@ -952,6 +952,9 @@ class FrigateFeedCard extends HTMLElement {
     } else {
       infoVideoEl.addEventListener("loadedmetadata", applyInitialSeek, { once: true });
     }
+    const syncChips = () => this._syncDetectionChips(infoVideoEl);
+    infoVideoEl.addEventListener("durationchange", syncChips);
+    infoVideoEl.addEventListener("loadedmetadata", syncChips);
     const attemptPlay = () => {
       const playPromise = infoVideoEl.play();
       if (playPromise && typeof playPromise.catch === "function") {
@@ -1004,6 +1007,7 @@ class FrigateFeedCard extends HTMLElement {
     if (mediaSlotEl && !keepMedia) mediaSlotEl.innerHTML = this._buildInfoMediaHtml(infoItem);
     if (detectionValueEl) detectionValueEl.textContent = this._labelsText(infoItem);
     if (detectionsRowEl) detectionsRowEl.outerHTML = this._buildInfoDetectionsRowHtml(infoItem);
+    if (keepMedia) this._syncDetectionChips(this.shadowRoot.querySelector("video.info-video"));
     if (startEndEl) startEndEl.textContent = this._formatStartEndLine(infoItem);
     if (linksValueEl) linksValueEl.innerHTML = this._buildInfoLinksHtml(infoItem);
     if (downloadsSlotEl) downloadsSlotEl.innerHTML = this._buildInfoDownloadsHtml(infoItem);
@@ -1098,13 +1102,23 @@ class FrigateFeedCard extends HTMLElement {
         return `
           <button class="detection-chip" type="button" data-seek="${Number.isFinite(offset) ? offset : 0}"
             title="${title} - ${this._t("seek_to_detection")}" aria-label="${title} ${formatClipOffset(offset)}"
-            ${seekable ? "" : "disabled"}>
+            ${seekable ? "" : 'disabled data-unseekable="1"'}>
             <ha-icon icon="${this._labelIconName(label)}"></ha-icon><span>${formatClipOffset(offset)}</span>
           </button>
         `;
       })
       .join("");
     return `<div class="info-row info-detections-row"><span class="info-label">${this._t("detections")}:</span><span class="info-value detection-chips">${chips}</span></div>`;
+  }
+
+  // Chips past the end of the clip cannot seek anywhere (e.g. a clip cut short).
+  _syncDetectionChips(videoEl) {
+    const duration = Number(videoEl?.duration);
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    this.shadowRoot?.querySelectorAll(".detection-chip[data-seek]").forEach((chip) => {
+      if (chip.dataset.unseekable === "1") return;
+      chip.disabled = Number(chip.dataset.seek) > duration;
+    });
   }
 
   _seekInfoVideo(seconds) {
