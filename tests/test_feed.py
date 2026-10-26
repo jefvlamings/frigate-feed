@@ -450,3 +450,27 @@ async def test_stop_cancels_clip_ready_timers(hass: HomeAssistant, fake_frigate,
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=30))
     await hass.async_block_till_done()
     assert received == []
+
+
+async def test_unreviewed_events_are_hidden(hass: HomeAssistant, fake_frigate, source) -> None:
+    """Events Frigate never classified as alert/detection have no clip and are hidden."""
+    person = _event(fake_frigate, PERSON_ID)
+    person["data"]["max_severity"] = None
+    person["has_clip"] = False
+    assert event_to_item(person, source) is None
+
+    # Frigate < 0.14 has no review severity at all: keep the event.
+    legacy = _event(fake_frigate, PERSON_ID)
+    legacy["data"].pop("max_severity")
+    assert event_to_item(legacy, source) is not None
+
+    for event in fake_frigate.client.events:
+        if event["id"] == PERSON_ID:
+            event["data"]["max_severity"] = None
+            event["has_clip"] = False
+    manager = _manager(hass, source)
+    await manager.async_start()
+    ids = [item.id for item in await manager.async_list_items()]
+    assert PERSON_ID not in ids
+    assert IN_PROGRESS_ID in ids
+    await manager.async_stop()

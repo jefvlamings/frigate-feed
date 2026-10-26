@@ -46,8 +46,7 @@ async def _async_mqtt_available(hass: HomeAssistant) -> bool:
         return False
 
 
-def parse_event_message(payload: Any) -> dict[str, Any] | None:
-    """Turn a raw `<prefix>/events` payload into a feed update, or None to ignore it."""
+def _decode_payload(payload: Any) -> dict[str, Any] | None:
     if isinstance(payload, (bytes, bytearray)):
         try:
             payload = payload.decode("utf-8")
@@ -57,7 +56,13 @@ def parse_event_message(payload: Any) -> dict[str, Any] | None:
         data = json.loads(payload)
     except (TypeError, ValueError):
         return None
-    if not isinstance(data, dict):
+    return data if isinstance(data, dict) else None
+
+
+def parse_event_message(payload: Any) -> dict[str, Any] | None:
+    """Turn a raw `<prefix>/events` payload into a feed update, or None to ignore it."""
+    data = _decode_payload(payload)
+    if data is None:
         return None
     event_type = data.get("type")
     if event_type not in LIVE_EVENT_TYPES:
@@ -76,12 +81,53 @@ def parse_event_message(payload: Any) -> dict[str, Any] | None:
     }
 
 
+def _review_detections(review: Any) -> list[str]:
+    data = review.get("data") if isinstance(review, dict) else None
+    detections = data.get("detections") if isinstance(data, dict) else None
+    return [str(event_id) for event_id in detections] if isinstance(detections, list) else []
+
+
+def parse_review_message(payload: Any) -> dict[str, Any] | None:
+    """Turn a raw `<prefix>/reviews` payload into a feed update, or None to ignore it.
+
+    The feed only lists events Frigate classified as an alert or detection, which
+    usually happens after the event started (e.g. when the object enters a required
+    zone). Frigate announces that on the reviews topic: a `new` review item, or an
+    `update` that adds a detection to an existing one.
+    """
+    data = _decode_payload(payload)
+    if data is None:
+        return None
+    review_type = data.get("type")
+    after = data.get("after")
+    if review_type not in ("new", "update") or not isinstance(after, dict):
+        return None
+    detections = _review_detections(after)
+    added = [event_id for event_id in detections if event_id not in _review_detections(data.get("before"))]
+    if review_type == "update" and not added:
+        return None
+    review_data = after.get("data")
+    objects = review_data.get("objects") if isinstance(review_data, dict) else None
+    buckets = [bucket_frigate_label(obj) for obj in objects] if isinstance(objects, list) else []
+    bucket = next((bucket for bucket in buckets if bucket), None)
+    if bucket is None:
+        return None
+    return {
+        "type": "review",
+        "event_id": (added or detections or [None])[-1],
+        "camera": after.get("camera"),
+        "label": bucket,
+    }
+
+
 async def async_setup_mqtt_listener(
     hass: HomeAssistant, source: FrigateSource, manager: "FrigateFeedManager"
 ) -> Callable[[], None]:
-    """Subscribe to f"{source.topic_prefix}/events" and return an unsubscribe callable.
+    """Subscribe to f"{source.topic_prefix}/events" and f"{source.topic_prefix}/reviews".
 
-    For `new` and `end` messages whose `after.label` maps onto a feed bucket:
+    Returns an unsubscribe callable. For `new` and `end` event messages whose
+    `after.label` maps onto a feed bucket, and for review messages that add a
+    detection (see parse_review_message):
     debounce MQTT_DEBOUNCE_SECONDS, then call manager.invalidate_cache() and
     async_dispatcher_send(hass, SIGNAL_FEED_UPDATED,
         {"type": ..., "event_id": ..., "camera": ..., "label": <bucket>}).
@@ -89,6 +135,7 @@ async def async_setup_mqtt_listener(
     log a warning and return a no-op unsubscribe.
     """
     topic = f"{source.topic_prefix}/events"
+    review_topic = f"{source.topic_prefix}/reviews"
     if not await _async_mqtt_available(hass):
         _LOGGER.warning("MQTT is not available; live feed updates from %s are disabled", topic)
         return _noop
@@ -110,9 +157,8 @@ async def async_setup_mqtt_listener(
         async_dispatcher_send(hass, SIGNAL_FEED_UPDATED, update)
 
     @callback
-    def _on_message(msg: "ReceiveMessage") -> None:
+    def _queue(update: dict[str, Any] | None) -> None:
         nonlocal cancel_timer
-        update = parse_event_message(msg.payload)
         if update is None:
             return
         pending.clear()
@@ -120,11 +166,24 @@ async def async_setup_mqtt_listener(
         if cancel_timer is None:
             cancel_timer = async_call_later(hass, MQTT_DEBOUNCE_SECONDS, _fire)
 
+    @callback
+    def _on_message(msg: "ReceiveMessage") -> None:
+        _queue(parse_event_message(msg.payload))
+
+    @callback
+    def _on_review_message(msg: "ReceiveMessage") -> None:
+        _queue(parse_review_message(msg.payload))
+
     try:
-        unsub_mqtt = await mqtt.async_subscribe(hass, topic, _on_message)
+        unsub_events = await mqtt.async_subscribe(hass, topic, _on_message)
     except HomeAssistantError as err:
         _LOGGER.warning("Could not subscribe to %s; live feed updates disabled: %s", topic, err)
         return _noop
+    try:
+        unsub_reviews = await mqtt.async_subscribe(hass, review_topic, _on_review_message)
+    except HomeAssistantError as err:
+        _LOGGER.warning("Could not subscribe to %s; new alerts appear when they end: %s", review_topic, err)
+        unsub_reviews = _noop
 
     @callback
     def _unsubscribe() -> None:
@@ -133,6 +192,7 @@ async def async_setup_mqtt_listener(
             cancel_timer()
             cancel_timer = None
         pending.clear()
-        unsub_mqtt()
+        unsub_events()
+        unsub_reviews()
 
     return _unsubscribe

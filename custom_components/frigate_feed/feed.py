@@ -54,6 +54,17 @@ def _event_data(event: dict[str, Any]) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _is_reviewed(event: dict[str, Any]) -> bool:
+    """True when Frigate classified the event as an alert or detection.
+
+    Objects that never qualify for review (e.g. outside the camera's required zones)
+    get no event clip and are not shown in Frigate's Review UI, so the feed hides them
+    too. Frigate < 0.14 has no review severity; those events are all kept.
+    """
+    data = _event_data(event)
+    return "max_severity" not in data or bool(data.get("max_severity"))
+
+
 def _event_score(event: dict[str, Any]) -> float | None:
     data = _event_data(event)
     for value in (data.get("top_score"), event.get("top_score"), data.get("score")):
@@ -104,7 +115,8 @@ def _resolve_event_recording(event: dict[str, Any], source: FrigateSource) -> di
 def event_to_item(event: dict[str, Any], source: FrigateSource) -> DetectionItem | None:
     """Convert one Frigate event dict into a DetectionItem.
 
-    Returns None when the label does not map onto a feed bucket.
+    Returns None when the label does not map onto a feed bucket, or when Frigate
+    did not classify the event as an alert or detection (`data.max_severity` empty).
     - id = event["id"]; label = bucket_frigate_label(event["label"])
     - start_ts/end_ts = local ISO strings from epoch start_time/end_time
     - duration_s = rounded end - start (None while in progress)
@@ -124,7 +136,7 @@ def event_to_item(event: dict[str, Any], source: FrigateSource) -> DetectionItem
     raw_label = str(event.get("label") or "")
     label = bucket_frigate_label(raw_label)
     start = _as_float(event.get("start_time"))
-    if not event_id or label is None or start is None:
+    if not event_id or label is None or start is None or not _is_reviewed(event):
         return None
     end = _as_float(event.get("end_time"))
     camera = str(event.get("camera") or "")
