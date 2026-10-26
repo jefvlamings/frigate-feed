@@ -4,12 +4,41 @@
     "step": {
       "user": {
         "title": "Frigate Feed",
-        "description": "Add the Frigate Feed integration."
+        "description": "Add the Frigate Feed integration. Choose which Frigate instance to read detections from.",
+        "data": {
+          "frigate_entry_id": "Frigate instance"
+        },
+        "data_description": {
+          "frigate_entry_id": "The Frigate integration entry that provides the detections."
+        }
       }
+    },
+    "error": {
+      "unknown_frigate_entry": "The selected Frigate instance no longer exists. Choose another one."
     },
     "abort": {
       "single_instance_allowed": "Only a single Frigate Feed instance is allowed.",
-      "no_frigate": "Set up the Frigate integration first."
+      "already_configured": "Frigate Feed is already configured.",
+      "no_frigate": "Set up the official Frigate integration first."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Frigate Feed options",
+        "data": {
+          "enabled_labels": "Enabled detections"
+        },
+        "sections": {
+          "retention_policy": {
+            "name": "Retention policy",
+            "data": {
+              "retention_hours": "Retention (hours)",
+              "max_detections": "Maximum detections"
+            }
+          }
+        }
+      }
     }
   }
 }

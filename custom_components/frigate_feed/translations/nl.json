@@ -4,12 +4,41 @@
     "step": {
       "user": {
         "title": "Frigate Feed",
-        "description": "Voeg de Frigate Feed-integratie toe."
+        "description": "Voeg de Frigate Feed-integratie toe. Kies van welke Frigate-instantie de detecties komen.",
+        "data": {
+          "frigate_entry_id": "Frigate-instantie"
+        },
+        "data_description": {
+          "frigate_entry_id": "De Frigate-integratie die de detecties levert."
+        }
       }
     },
+    "error": {
+      "unknown_frigate_entry": "De gekozen Frigate-instantie bestaat niet meer. Kies een andere."
+    },
     "abort": {
-      "single_instance_allowed": "Er is maar een Frigate Feed-instantie toegestaan.",
-      "no_frigate": "Stel eerst de Frigate-integratie in."
+      "single_instance_allowed": "Er is maar één Frigate Feed-instantie toegestaan.",
+      "already_configured": "Frigate Feed is al ingesteld.",
+      "no_frigate": "Stel eerst de officiële Frigate-integratie in."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Frigate Feed-opties",
+        "data": {
+          "enabled_labels": "Ingeschakelde detecties"
+        },
+        "sections": {
+          "retention_policy": {
+            "name": "Bewaarbeleid",
+            "data": {
+              "retention_hours": "Bewaartermijn (uren)",
+              "max_detections": "Maximum aantal detecties"
+            }
+          }
+        }
+      }
     }
   }
 }
