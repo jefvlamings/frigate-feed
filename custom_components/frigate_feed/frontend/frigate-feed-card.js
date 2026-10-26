@@ -85,6 +85,9 @@ const CARD_I18N = {
     close_info_dialog: "Close info dialog",
     snapshot: "Snapshot",
     page_size: "Items per page",
+    thumbnails: "Thumbnails",
+    thumbnail_object: "Object (cropped)",
+    thumbnail_frame: "Full frame",
     not_found: "Not found",
     download_failed: "Download failed",
     pending: "Pending",
@@ -127,6 +130,9 @@ const CARD_I18N = {
     close_info_dialog: "Sluit detectiedialoog",
     snapshot: "Snapshot",
     page_size: "Items per pagina",
+    thumbnails: "Miniaturen",
+    thumbnail_object: "Object (bijgesneden)",
+    thumbnail_frame: "Volledig beeld",
     not_found: "Niet gevonden",
     download_failed: "Download mislukt",
     pending: "In behandeling",
@@ -289,6 +295,7 @@ class FrigateFeedCard extends HTMLElement {
       cameras: [],
       page_size: 20,
       show_timeline: true,
+      thumbnail: "object",
       ...config,
     };
     const rawLabels = Array.isArray(this._config.labels)
@@ -1296,13 +1303,19 @@ class FrigateFeedCard extends HTMLElement {
         </div>
       `;
     })();
+    // `thumbnail: object` (default) shows the snapshot cropped to the object, like Frigate's
+    // Explore page; `frame` (or items without a crop) shows the whole frame, focused on the box.
+    const objectThumbnails = this._config.thumbnail !== "frame";
     const listHtml = pagedItems
       .map((item) => {
-        const image = item.snapshot_url
-          ? `<img src="${item.snapshot_url}" alt="${item.camera_name}" loading="lazy"${
-              Array.isArray(item.frigate?.box) ? ` data-focus-box="${JSON.stringify(item.frigate.box)}"` : ""
-            } />`
-          : `<div class="placeholder">${this._t("no_snapshot")}</div>`;
+        const image =
+          objectThumbnails && item.thumbnail_url
+            ? `<img src="${item.thumbnail_url}" alt="${item.camera_name}" loading="lazy" />`
+            : item.snapshot_url
+              ? `<img src="${item.snapshot_url}" alt="${item.camera_name}" loading="lazy"${
+                  Array.isArray(item.frigate?.box) ? ` data-focus-box="${JSON.stringify(item.frigate.box)}"` : ""
+                } />`
+              : `<div class="placeholder">${this._t("no_snapshot")}</div>`;
 
         return `
           <li class="item" data-id="${item.id}">
@@ -1832,6 +1845,7 @@ class FrigateFeedCardEditor extends HTMLElement {
     if (!this.shadowRoot) return;
     const pageSize = Number(this._config?.page_size ?? 20);
     const showTimeline = this._config?.show_timeline !== false;
+    const thumbnail = this._config?.thumbnail === "frame" ? "frame" : "object";
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
@@ -1839,7 +1853,7 @@ class FrigateFeedCardEditor extends HTMLElement {
         .field { display: grid; gap: 4px; }
         .field.toggle { display: flex; align-items: center; justify-content: space-between; }
         label { color: var(--primary-text-color); font-size: 13px; }
-        input[type="text"], input[type="number"] {
+        input[type="text"], input[type="number"], select {
           border: 1px solid var(--divider-color);
           background: var(--card-background-color);
           color: var(--primary-text-color);
@@ -1857,6 +1871,13 @@ class FrigateFeedCardEditor extends HTMLElement {
           <label for="show_timeline">${this._t("show_timeline")}</label>
           <ha-switch id="show_timeline" ${showTimeline ? "checked" : ""}></ha-switch>
         </div>
+        <div class="field">
+          <label for="thumbnail">${this._t("thumbnails")}</label>
+          <select id="thumbnail">
+            <option value="object" ${thumbnail === "object" ? "selected" : ""}>${this._t("thumbnail_object")}</option>
+            <option value="frame" ${thumbnail === "frame" ? "selected" : ""}>${this._t("thumbnail_frame")}</option>
+          </select>
+        </div>
       </div>
     `;
 
@@ -1865,6 +1886,9 @@ class FrigateFeedCardEditor extends HTMLElement {
     });
     this.shadowRoot.querySelector("#show_timeline")?.addEventListener("change", (ev) => {
       this._onBooleanChange("show_timeline", ev.target.checked);
+    });
+    this.shadowRoot.querySelector("#thumbnail")?.addEventListener("change", (ev) => {
+      this._emitConfig({ ...this._config, thumbnail: ev.target.value === "frame" ? "frame" : "object" });
     });
   }
 }

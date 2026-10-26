@@ -56,6 +56,7 @@ cameras:
   - driveway
 page_size: 20
 show_timeline: true
+thumbnail: object
 ```
 
 | Option | Default | Description |
@@ -64,6 +65,7 @@ show_timeline: true
 | `cameras` | all cameras | Only show detections from these cameras. |
 | `page_size` | `20` | Items per page. |
 | `show_timeline` | `true` | Show the timeline header with clustered detections. |
+| `thumbnail` | `object` | Grid thumbnails: `object` crops the snapshot to the detected object (like Frigate's Explore page), `frame` shows the whole frame centred on the object. The dialog always shows the full snapshot. |
 
 The card is also available in the card picker and has a visual editor.
 
@@ -84,7 +86,8 @@ Items keep the reolink-feed shape (`id`, `start_ts`, `end_ts`, `duration_s`, `la
 - `detections`: its Frigate events (`event_id`, `label`, `frigate_label`, `sub_label`, `score`,
   `start_offset_s` into the clip, `duration_s`, `has_snapshot`), oldest first
 - `frigate`: review id, best event id, severity, camera, objects, sub labels, zones and `box`
-  (the object box on the snapshot, `[x, y, w, h]` fractions; the card crops thumbnails around it)
+  (the object box on the snapshot, `[x, y, w, h]` fractions; used to centre `frame` thumbnails)
+- `thumbnail_url`: the best detection's snapshot cropped to the object (`snapshot.jpg?crop=1&bbox=0&height=400&quality=80`), or `null`
 
 `snapshot_url` and `recording.local_url` are signed Home Assistant paths to the media proxy:
 `/api/frigate_feed/media/{event_id}/snapshot.jpg` (best detection) or

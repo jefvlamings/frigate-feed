@@ -12,13 +12,14 @@ from pathlib import PurePosixPath
 import re
 import time
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import aiohttp
 from aiohttp import hdrs, web
+from yarl import URL
 
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.components.http.auth import async_sign_path
+from homeassistant.components.http.auth import SAFE_QUERY_PARAMS, async_sign_path
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -44,7 +45,7 @@ DATA_CLIP_CACHE = f"{DOMAIN}_clip_cache"
 MEDIA_PATH_PREFIX = "/api/frigate_feed/media/"
 
 EVENT_ID_RE = re.compile(r"^[0-9]+\.[0-9]+-[a-z0-9]+$", re.IGNORECASE)
-SNAPSHOT_QUERY_PARAMS: tuple[str, ...] = ("height", "quality")
+SNAPSHOT_QUERY_PARAMS: tuple[str, ...] = ("height", "quality", "crop", "bbox")
 _SAFE_PARAM_VALUE_RE = re.compile(r"^[0-9]{1,5}$")
 
 FORWARDED_REQUEST_HEADERS: tuple[str, ...] = (
@@ -104,15 +105,15 @@ def async_register_media_views(
 
 
 def sign_item_urls(hass: HomeAssistant, item: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of an item dict with snapshot_url and recording.local_url signed.
+    """Return a copy of an item dict with snapshot_url, thumbnail_url and recording.local_url signed.
 
     Must be called while handling a websocket command so async_sign_path can bind
     the signature to the current connection's refresh token. Uses SIGNED_URL_EXPIRY.
     """
     signed = dict(item)
-    snapshot_url = signed.get("snapshot_url")
-    if _is_media_path(snapshot_url):
-        signed["snapshot_url"] = _sign_path(hass, snapshot_url)
+    for key in ("snapshot_url", "thumbnail_url"):
+        if _is_media_path(url := signed.get(key)):
+            signed[key] = _sign_path(hass, url)
     recording = signed.get("recording")
     if isinstance(recording, dict):
         recording = signed["recording"] = dict(recording)
@@ -133,12 +134,17 @@ def _sign_path(hass: HomeAssistant, path: str) -> str:
     websocket command) or the current HTTP request to pick the refresh token, and
     falls back to HA's read-only content user. It only fails when the http
     component's auth has not been set up; then the unsigned path is returned.
+
+    async_sign_path leaves SAFE_QUERY_PARAMS (height, width) out of both the signature
+    and the returned URL, since clients may change them; they are appended again.
     """
     try:
-        return async_sign_path(hass, path, SIGNED_URL_EXPIRY)
+        signed = async_sign_path(hass, path, SIGNED_URL_EXPIRY)
     except KeyError:
         _LOGGER.debug("Cannot sign %s: HTTP auth not set up; returning unsigned path", path)
         return path
+    safe = [(key, value) for key, value in URL(path).query.items() if key in SAFE_QUERY_PARAMS]
+    return f"{signed}&{urlencode(safe)}" if safe else signed
 
 
 def is_valid_event_id(event_id: str) -> bool:

@@ -46,6 +46,9 @@ MEDIA_KINDS: tuple[str, ...] = (MEDIA_KIND_SNAPSHOT, MEDIA_KIND_CLIP)
 REVIEW_MEDIA_URL = "/api/frigate_feed/media/review/{review_id}/{kind}"
 REVIEW_MEDIA_KIND_THUMB = "thumb.webp"
 REVIEW_MEDIA_KINDS: tuple[str, ...] = (MEDIA_KIND_CLIP, REVIEW_MEDIA_KIND_THUMB)
+# Grid thumbnail: the event snapshot cropped to the object (like Frigate's Explore page),
+# without the bounding box overlay, sized for sharp tiles on high-DPI screens.
+THUMBNAIL_QUERY = "crop=1&bbox=0&height=400&quality=80"
 
 SUPPORTED_DETECTION_LABELS: tuple[str, ...] = ("person", "pet", "vehicle")
 DEFAULT_ENABLED_DETECTION_LABELS: tuple[str, ...] = SUPPORTED_DETECTION_LABELS

@@ -27,6 +27,7 @@ from .const import (
     REVIEW_MEDIA_KIND_THUMB,
     REVIEW_MEDIA_URL,
     SIGNAL_FEED_UPDATED,
+    THUMBNAIL_QUERY,
     bucket_frigate_label,
     frigate_labels_for_buckets,
 )
@@ -180,6 +181,7 @@ def review_to_item(
     - detections = the review's events found in `events` with a wanted label, by start,
       with offsets into the recording clip
     - snapshot_url = snapshot of the best detection, else the review thumbnail
+    - thumbnail_url = the best detection's snapshot cropped to the object (None without one)
     - recording = the camera recording over the review window padded with pre/post
       capture, served by the review media proxy:
         in progress                    -> {"status": "pending"}
@@ -240,6 +242,11 @@ def review_to_item(
             MEDIA_URL.format(event_id=best["id"], kind=MEDIA_KIND_SNAPSHOT)
             if best
             else REVIEW_MEDIA_URL.format(review_id=review_id, kind=REVIEW_MEDIA_KIND_THUMB)
+        ),
+        thumbnail_url=(
+            f"{MEDIA_URL.format(event_id=best['id'], kind=MEDIA_KIND_SNAPSHOT)}?{THUMBNAIL_QUERY}"
+            if best
+            else None
         ),
         recording=recording,
         detections=detections,

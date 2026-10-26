@@ -153,6 +153,9 @@ async def test_review_to_item_linked(hass: HomeAssistant, fake_frigate, source) 
     assert item.camera_name == "Front Door"
     assert item.source_entity_id == "binary_sensor.front_door_person_occupancy"
     assert item.snapshot_url == f"/api/frigate_feed/media/{PERSON_EVENT}/snapshot.jpg"
+    assert item.thumbnail_url == (
+        f"/api/frigate_feed/media/{PERSON_EVENT}/snapshot.jpg?crop=1&bbox=0&height=400&quality=80"
+    )
     assert item.start_dt == dt_util.utc_from_timestamp(review["start_time"])
     assert item.start_dt.utcoffset() == dt_util.as_local(item.start_dt).utcoffset()
     assert item.end_dt == dt_util.utc_from_timestamp(review["end_time"])
@@ -204,6 +207,7 @@ async def test_review_to_item_linked(hass: HomeAssistant, fake_frigate, source) 
         "source_entity_id",
         "camera_name",
         "snapshot_url",
+        "thumbnail_url",
         "recording",
         "detections",
         "frigate",
@@ -233,6 +237,7 @@ async def test_review_to_item_statuses_and_buckets(hass: HomeAssistant, fake_fri
     # No detection with a snapshot: fall back to the review thumbnail.
     dog = _item(fake_frigate, source, DOG_ID)
     assert dog.snapshot_url == f"/api/frigate_feed/media/review/{DOG_ID}/thumb.webp"
+    assert dog.thumbnail_url is None
     assert dog.source_entity_id == "camera.front_door"
     assert dog.frigate["sub_labels"] == ["Rex"]
     assert dog.frigate["event_id"] is None

@@ -13,6 +13,7 @@ import jwt
 import pytest
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 import voluptuous as vol
+from yarl import URL
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
@@ -152,7 +153,7 @@ async def test_snapshot_proxy_copies_headers(hass: HomeAssistant, holder: Source
         },
     )
     client = await hass_client()
-    resp = await client.get(f"{SNAPSHOT_PATH}?height=200&quality=70&evil=1&bbox=1")
+    resp = await client.get(f"{SNAPSHOT_PATH}?height=200&quality=70&evil=1&crop=1&bbox=yes")
     assert resp.status == HTTPStatus.OK
     assert await resp.read() == b"jpegdata"
     assert resp.headers["Content-Type"] == "image/jpeg"
@@ -164,7 +165,7 @@ async def test_snapshot_proxy_copies_headers(hass: HomeAssistant, holder: Source
     assert "Set-Cookie" not in resp.headers
 
     _, url, _, headers = aioclient_mock.mock_calls[-1]
-    assert dict(url.query) == {"height": "200", "quality": "70"}
+    assert dict(url.query) == {"height": "200", "quality": "70", "crop": "1"}
     assert headers["Authorization"] == "Bearer frigate-token"
     assert "Range" not in headers
 
@@ -358,10 +359,11 @@ async def test_signed_urls_from_websocket_work_without_auth(
     result = (await ws.receive_json())["result"]
 
     refresh_token = hass.auth.async_validate_access_token(hass_access_token)
-    claims = jwt.decode(
-        result["snapshot_url"].split("authSig=")[1], options={"verify_signature": False}
-    )
+    snapshot_query = URL(result["snapshot_url"]).query
+    claims = jwt.decode(snapshot_query["authSig"], options={"verify_signature": False})
     assert claims["iss"] == refresh_token.id
+    # HA leaves `height` out of signatures and signed URLs; sign_item_urls keeps it.
+    assert snapshot_query["height"] == "200"
 
     aioclient_mock.get(UPSTREAM_SNAPSHOT, content=b"jpeg", headers={"Content-Type": "image/jpeg"})
     aioclient_mock.get(UPSTREAM_CLIP, content=CLIP_BYTES, headers={"Content-Type": "video/mp4"})
