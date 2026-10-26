@@ -1468,22 +1468,25 @@ class FrigateFeedCard extends HTMLElement {
         .info-media-frame {
           width: 100%;
           max-width: 100%;
-          height: clamp(260px, 40vh, 420px);
           box-sizing: border-box;
           border-radius: 8px;
           border: 1px solid var(--divider-color);
           background: #000;
           overflow: hidden;
         }
+        /* Full width at the media's own aspect ratio; tall media is letterboxed. */
         .info-video, .info-snapshot, .info-media-frame .placeholder {
           width: 100%;
           max-width: 100%;
-          height: 100%;
+          height: auto;
+          max-height: 70vh;
           box-sizing: border-box;
           display: block;
         }
-        .info-video { background: #000; object-fit: cover; }
-        .info-snapshot { object-fit: cover; }
+        /* Until the metadata is loaded, reserve a 16:9 box instead of the 2:1 default. */
+        .info-video { background: #000; object-fit: contain; aspect-ratio: auto 16 / 9; }
+        .info-snapshot { object-fit: contain; }
+        .info-media-frame .placeholder { aspect-ratio: 16 / 9; }
         .info-body .placeholder {
           display: grid;
           place-items: center;

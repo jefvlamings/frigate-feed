@@ -20,7 +20,7 @@
   `python3 -m venv ~/.cache/frigate-feed-venv && ~/.cache/frigate-feed-venv/bin/pip install -r requirements_test.txt`).
 - `docker compose -p frigate-feed-dev up -d`: start the dev stack (HA on http://localhost:8124).
 - `docker compose -p frigate-feed-dev restart homeassistant`: reload after backend code changes.
-- `./scripts/bump-card-resource-version.sh`: bump the Lovelace resource `?v=` after card changes.
+- `HA_TOKEN=<token> ./scripts/bump-card-resource-version.sh`: bump the Lovelace resource `?v=` after card changes.
 
 ## Safety
 - This machine also runs production containers (`home-assistant` on :8123, `frigate`, `mosquitto` on :1883).

@@ -138,11 +138,11 @@ Useful commands:
 ```bash
 # Reload after backend changes
 docker compose -p frigate-feed-dev restart homeassistant
-# Bump the Lovelace resource ?v= after card changes
-./scripts/bump-card-resource-version.sh
+# Bust the browser cache after card changes (bumps the Lovelace resource ?v=, no restart)
+HA_TOKEN=<long-lived token> ./scripts/bump-card-resource-version.sh
 # Inspect Frigate
 docker compose -p frigate-feed-dev exec frigate-dev curl -s localhost:5000/api/version
-docker compose -p frigate-feed-dev exec frigate-dev curl -s 'localhost:5000/api/events?limit=5'
+docker compose -p frigate-feed-dev exec frigate-dev curl -s 'localhost:5000/api/review?limit=5'
 # Tear down and remove Frigate dev data (files are root-owned, so delete from a container)
 docker compose -p frigate-feed-dev down -v
 docker run --rm -v "$PWD/dev/frigate:/d" --entrypoint /bin/rm eclipse-mosquitto:2 -rf /d/storage
