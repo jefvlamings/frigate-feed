@@ -1,0 +1,93 @@
+# Frigate 0.18 dev config for the frigate-feed-dev compose project.
+# Fake cameras: go2rtc loops the local clips from dev/media (see scripts/fetch-dev-media.sh).
+# Dev only: no auth, CPU detector, 1 day retention.
+version: 0.18-0
+
+mqtt:
+  enabled: true
+  host: mosquitto-dev
+  port: 1883
+  topic_prefix: frigate
+  client_id: frigate-feed-dev
+
+auth:
+  enabled: false
+
+tls:
+  enabled: false
+
+database:
+  path: /media/frigate/frigate.db
+
+detectors:
+  cpu1:
+    type: cpu
+    num_threads: 2
+
+go2rtc:
+  streams:
+    # exec sources need GO2RTC_ALLOW_ARBITRARY_EXEC=true (set in docker-compose.yml).
+    front_door:
+      - "exec:/usr/lib/ffmpeg/7.0/bin/ffmpeg -hide_banner -loglevel error -re -stream_loop -1 -i /media/dev/front_door.mp4 -c copy -rtsp_transport tcp -f rtsp {{output}}"
+    driveway:
+      - "exec:/usr/lib/ffmpeg/7.0/bin/ffmpeg -hide_banner -loglevel error -re -stream_loop -1 -i /media/dev/driveway.mp4 -c copy -rtsp_transport tcp -f rtsp {{output}}"
+
+detect:
+  enabled: true
+  width: 640
+  height: 360
+  fps: 5
+
+objects:
+  track:
+    - person
+    - dog
+    - cat
+    - bird
+    - car
+
+record:
+  enabled: true
+  continuous:
+    days: 0
+  motion:
+    days: 1
+  alerts:
+    pre_capture: 5
+    post_capture: 5
+    retain:
+      days: 1
+      mode: motion
+  detections:
+    pre_capture: 5
+    post_capture: 5
+    retain:
+      days: 1
+      mode: motion
+
+snapshots:
+  enabled: true
+  bounding_box: true
+  retain:
+    default: 1
+
+cameras:
+  front_door:
+    ffmpeg:
+      inputs:
+        - path: rtsp://127.0.0.1:8554/front_door
+          input_args: preset-rtsp-restream
+          roles:
+            - detect
+            - record
+  driveway:
+    # The dog clip is handheld (panning): keep detecting during whole-frame motion.
+    motion:
+      lightning_threshold: 1.0
+    ffmpeg:
+      inputs:
+        - path: rtsp://127.0.0.1:8554/driveway
+          input_args: preset-rtsp-restream
+          roles:
+            - detect
+            - record

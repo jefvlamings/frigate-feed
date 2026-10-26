@@ -193,23 +193,35 @@ Camera filtering stays as the card's existing `cameras:` YAML option (no backend
 ---
 
 ## Phases
-1. **Scaffold** — `git init`, repo skeleton for `github.com/jefvlamings/frigate-feed`
-   (manifest `frigate_feed` v0.1.0, hacs.json, scripts, AGENTS.md, hassfest + HACS CI).
-2. **Dev environment** — docker-compose with HA + Frigate (auth, fake cameras) + mosquitto;
-   confirm Frigate produces person/pet/vehicle events and the Frigate integration is loaded.
-3. **Frigate client + config flow** — `frigate_api.py` (JWT login on 8971, refresh on 401, TLS
-   setting), pick Frigate integration entry, connection validation.
-4. **Feed manager + WS API** — event → `DetectionItem` mapping, label bucketing, entity lookup for
-   `source_entity_id`, `list` / `resolve_recording` / `delete_item` (hide), cache, hidden-id store.
-5. **Media proxy** — snapshot + clip views with Range support, signed URLs.
-6. **MQTT live refresh** — `frigate/events` subscription → debounced `frigate_feed_updated`.
+1. **Scaffold** — repo skeleton for `github.com/jefvlamings/frigate-feed` (manifest
+   `frigate_feed` v0.1.0, hacs.json, AGENTS.md) with frozen module contracts so the units below
+   can be built in parallel.
+2. **Frigate source adapter** — `frigate_source.py`: read-only access to the official Frigate
+   integration's runtime data (`hass.data["frigate"][entry_id]`: client, cached config, entry
+   `url`), event fetch via the integration's client (its auth, any port), MQTT topic prefix,
+   per-camera `pre_capture`, occupancy/camera entity lookup via the entity registry. No own
+   HTTP client or JWT handling; never imports `custom_components.frigate`.
+3. **Feed manager + WS API** — `feed.py`: event → `DetectionItem` mapping, label bucketing,
+   `recording` status (`pending` while `end_time` is null, `linked` once `has_clip`), short list
+   cache, hidden-id store (`storage.py`); `frigate_feed/list`, `resolve_recording`,
+   `delete_item` (hide only).
+4. **Media proxy** — `media.py`: authenticated `/api/frigate_feed/media/{event_id}/{kind}` view
+   streaming snapshot/clip from Frigate with the integration's auth headers; signed URLs.
+5. **MQTT listener** — `mqtt_listener.py`: `<topic_prefix>/events` subscription → cache
+   invalidation + debounced `frigate_feed_updated`, exposed to the card via
+   `frigate_feed/subscribe`.
+6. **Config + options flow** — pick the Frigate config entry (abort `no_frigate`), options for
+   labels / retention / max detections; en + nl translations.
 7. **Card port** — copy + renames + changes above; verify side-by-side against reolink-feed in
    the dev HA (desktop + mobile width, dialog, timeline clusters, share/download, live refresh).
-8. **Options flow + translations** — en/nl.
+8. **Dev environment + CI** — docker-compose (`frigate-feed-dev`: HA :8124, Frigate 0.18.2 with
+   two go2rtc fake cameras looping sample clips, mosquitto, all on a bridge network), media
+   fetch + Frigate integration install scripts; hassfest, HACS and pytest workflows; README.
 9. **Tests** — pytest: event mapping, label bucketing, status transitions, list filtering
-   (retention/labels/hidden), MQTT handler debounce, config-flow helpers; fake Frigate API via
-   aiohttp test server.
-10. **Release** — README, HACS validation, hassfest, tag `v0.1.0`, GitHub release.
+   (retention/labels/hidden), media proxy, MQTT handler debounce, config flow; Frigate
+   integration runtime data faked in `tests/conftest.py`.
+10. **Release** — end-to-end check in the dev stack, HACS validation, hassfest, tag `v0.1.0`,
+    GitHub release.
 
 ---
 
