@@ -467,6 +467,34 @@ async def test_review_clip_proxies_recording_window(
     assert _sent_headers(aioclient_mock)["Authorization"] == "Bearer frigate-token"
 
 
+async def test_clip_if_range_served_from_buffer(
+    hass: HomeAssistant, holder: SourceHolder, hass_client, aioclient_mock
+) -> None:
+    """Follow-up range requests carry If-Range with the buffered file's validators."""
+    aioclient_mock.get(UPSTREAM_REVIEW_CLIP, content=CLIP_BYTES, headers={"Content-Type": "video/mp4"})
+    client = await hass_client()
+    first = await client.get(REVIEW_CLIP_PATH, headers={"Range": "bytes=0-"})
+    assert first.status == HTTPStatus.PARTIAL_CONTENT
+    assert await first.read() == CLIP_BYTES
+    validator = first.headers["ETag"]
+
+    resp = await client.get(REVIEW_CLIP_PATH, headers={"Range": "bytes=1000-", "If-Range": validator})
+    assert resp.status == HTTPStatus.PARTIAL_CONTENT
+    assert await resp.read() == CLIP_BYTES[1000:]
+    resp = await client.get(REVIEW_CLIP_PATH, headers={"Range": "bytes=10-19", "If-Range": first.headers["Last-Modified"]})
+    assert resp.status == HTTPStatus.PARTIAL_CONTENT
+    assert await resp.read() == CLIP_BYTES[10:20]
+    # A stale date gets the whole (buffered) file, as HTTP requires. (aiohttp compares
+    # If-Range as a date only; an ETag value is ignored and the range is served.)
+    resp = await client.get(
+        REVIEW_CLIP_PATH, headers={"Range": "bytes=1000-", "If-Range": "Mon, 01 Jan 2001 00:00:00 GMT"}
+    )
+    assert resp.status == HTTPStatus.OK
+    assert await resp.read() == CLIP_BYTES
+    assert aioclient_mock.call_count == 1
+    assert holder.source.review_lookups == 1
+
+
 async def test_review_clip_ranges_buffered_without_repeated_lookups(
     hass: HomeAssistant, holder: SourceHolder, hass_client, aioclient_mock
 ) -> None:
