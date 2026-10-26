@@ -85,25 +85,33 @@ custom_components/frigate_feed/
   __init__.py        setup/unload, WS commands, card static path + Lovelace resource auto-add (ported)
   config_flow.py     pick Frigate source + options (labels, cameras, retention, max detections)
   const.py           domain, defaults, label mapping tables
-  frigate_api.py     NEW: thin async client (aiohttp via HA session): version, config, events, event, media
+  frigate_source.py  NEW: read-only adapter over the Frigate integration (client, config, entities)
+  mqtt_listener.py   NEW: frigate/events -> debounced live-update signal
   feed.py            NEW (much smaller than reolink's 2100 lines): FrigateFeedManager
-  media.py           NEW: authenticated HA proxy views for snapshot/clip
+  media.py           NEW: authenticated HA proxy view for snapshot/clip + URL signing
   models.py          DetectionItem (copied, + optional `frigate` dict)
-  storage.py         Store for hidden/deleted ids (+ optional item cache)
+  storage.py         Store for hidden ids
   frontend/frigate-feed-card.js   ported card
   translations/en.json, nl.json, strings.json
   tests/
 ```
 
-### Frigate connection (config flow)
-Target: Frigate **0.14+ on the authenticated port 8971**, connected to HA via the official
-**Frigate integration** (`frigate` domain).
-1. Manifest: `"dependencies": ["frigate", "mqtt"]`.
-2. Config flow lists the Frigate integration's config entries (auto-select if only one) and
-   reuses its `url` + `username`/`password`. Abort with a clear message if none exist.
-3. Auth: `POST /api/login` → JWT (`frigate_token` cookie / bearer); refresh on 401.
-   Self-signed TLS on 8971 is common → honour the Frigate entry's SSL-verify setting.
-4. Validate with `GET /api/version`, read `GET /api/config` for camera list + `pre_capture`.
+### Frigate connection (reuse the official Frigate integration)
+The official **Frigate integration** (`frigate` domain, v5.15.6) is required. We do **not**
+write our own Frigate HTTP client or auth: the integration stores per config entry
+`hass.data["frigate"][entry_id] = {"client": FrigateApiClient, "config": <api/config>, ...}`.
+`FrigateApiClient` already handles login/JWT, basic and bearer auth (any port, incl. 8971).
+1. Manifest: `dependencies: ["http"]`, `after_dependencies: ["frigate", "lovelace", "mqtt"]`.
+   "Required" is enforced at runtime: the config flow aborts with `no_frigate`, setup raises
+   `ConfigEntryNotReady` until the Frigate entry's runtime data exists. (Keeps tests/hassfest
+   independent of the external integration.)
+2. Config flow picks a Frigate config entry (auto when only one); entry data `{frigate_entry_id}`.
+3. `frigate_source.py` reads the client/config via string keys (never imports
+   `custom_components.frigate`): `client.async_get_events(...)`, `client.async_get_event(id)`,
+   `client.get_auth_headers()`, entry data `url` / `validate_ssl`, `config["mqtt"]["topic_prefix"]`,
+   per-camera `record.alerts|detections.pre_capture`.
+4. History/logbook links use entity registry unique ids `"{entry_id}:occupancy_sensor:{cam}_{label}"`,
+   fallback `"{entry_id}:camera:{cam}"`.
 Single instance (like reolink-feed).
 
 ### Ingestion: pull + MQTT push for live refresh
@@ -112,14 +120,17 @@ Single instance (like reolink-feed).
   No local item store needed → nothing to migrate, rebuild is trivial.
 - **Push (v1)**: subscribe to MQTT `<frigate topic_prefix>/events` (prefix from the Frigate
   entry/config, default `frigate`) via HA's `mqtt` component. On `new`/`end` for a mapped label,
-  invalidate the cache and fire HA event `frigate_feed_updated` (debounced ~2s).
-  Card subscribes with `hass.connection.subscribeEvents(..., "frigate_feed_updated")` and calls
+  invalidate the cache and send dispatcher signal `frigate_feed_updated` (debounced ~2s).
+  Non-admin users cannot `subscribe_events` to custom events, so the card uses the custom
+  subscription `hass.connection.subscribeMessage(cb, {type: "frigate_feed/subscribe"})` and calls
   `_loadItems()` (keeping page/filter/dialog state). Unsubscribe on `disconnectedCallback`.
 
 ### Media serving (decided: proxy, no copying)
-Register two authenticated `HomeAssistantView`s:
-- `/api/frigate_feed/{event_id}/snapshot.jpg`
-- `/api/frigate_feed/{event_id}/clip.mp4` (stream through, forward `Range` headers so `<video>` seeking works)
+Register one authenticated `HomeAssistantView` at `/api/frigate_feed/media/{event_id}/{kind}`
+(`kind` = `snapshot.jpg` | `clip.mp4`), streaming `{url}/api/events/{id}/{kind}` with the Frigate
+client's auth headers. Range headers are forwarded, but note Frigate's `clip.mp4` is a fragmented
+MP4 stream without Range support, so seeking is limited to buffered data. We don't use the Frigate
+integration's own notification proxy because it depends on an option that is off by default.
 
 The backend returns them as **signed paths** (`async_sign_path`, e.g. 24h expiry) in
 `snapshot_url` / `recording.local_url`, so `<img>`, `<video>` and the card's `fetch()`-based
@@ -164,13 +175,17 @@ Camera filtering stays as the card's existing `cameras:` YAML option (no backend
 ---
 
 ## Dev environment
-- `docker-compose.yml`: HA (same as reolink-feed) **plus Frigate 0.14+ and mosquitto**:
-  - Frigate with auth enabled on 8971, one or two fake cameras fed by go2rtc/ffmpeg looping
-    sample videos (people, a dog, a car) so all three label buckets produce events; detector `cpu`;
-    recording + snapshots enabled with short retention.
+- This machine also runs **production** HA (:8123, host network), Frigate 0.18.2 and mosquitto
+  (:1883). The dev stack must never touch them or bind those ports.
+- `docker-compose.yml` (project `frigate-feed-dev`, bridge network): HA 2026.10.4 published on
+  **8124**, **Frigate 0.18.2** and an unpublished mosquitto:
+  - Frigate without auth on internal :5000 (auth is handled by the Frigate integration's client,
+    so frigate_feed doesn't need to exercise it), one or two fake cameras fed by go2rtc/ffmpeg
+    looping sample videos (people, a dog, a car) so all three label buckets produce events;
+    detector `cpu`; recording + snapshots enabled with short retention.
   - mosquitto shared by Frigate and HA's MQTT integration.
-  - HA config pre-wired: MQTT broker + official Frigate integration (installed via HACS or
-    copied into `config/custom_components/frigate`), pointing at `https://frigate:8971`.
+  - Official Frigate integration v5.15.6 cloned into `config/custom_components/frigate`,
+    pointing at `http://frigate-dev:5000`.
 - Fake camera media lives in `dev/media/` (gitignored, fetched by a script).
 - `scripts/bump-card-resource-version.sh`: ported with renamed paths.
 - `AGENTS.md`, `README.md`, `hacs.json`, `.github/workflows/hassfest.yml`: ported.
@@ -206,7 +221,8 @@ Camera filtering stays as the card's existing `cameras:` YAML option (no backend
 | Burst merge | None; two simultaneous people = two items |
 | Delete | Hide only; never modifies Frigate |
 | Labels | Bucket into person/pet/vehicle; drop motion/visitor; raw label kept in `item.frigate` |
-| Connection | Via the official Frigate integration's config entry; Frigate 0.14+ on 8971 (JWT auth) |
+| Connection | Required official Frigate integration; reuse its client/auth and cached config |
+| Live refresh | MQTT `frigate/events` → dispatcher → `frigate_feed/subscribe` WS subscription |
 | Dev env | Local Frigate + fake cameras + mosquitto in docker-compose |
 | Packaging | Separate HACS repo `jefvlamings/frigate-feed`, starting v0.1.0 |
 | Card | One-time fork of reolink-feed card; free to diverge afterwards |

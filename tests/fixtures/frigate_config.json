@@ -1,0 +1,38 @@
+{
+  "mqtt": {
+    "enabled": true,
+    "host": "mqtt.test",
+    "port": 1883,
+    "topic_prefix": "frigate",
+    "client_id": "frigate"
+  },
+  "auth": {
+    "enabled": false
+  },
+  "cameras": {
+    "front_door": {
+      "name": "front_door",
+      "enabled": true,
+      "record": {
+        "enabled": true,
+        "alerts": {"pre_capture": 5, "post_capture": 5},
+        "detections": {"pre_capture": 3, "post_capture": 3}
+      },
+      "snapshots": {"enabled": true},
+      "objects": {"track": ["person", "cat", "dog", "bird"]},
+      "zones": {"driveway": {}}
+    },
+    "garden_shed": {
+      "name": "garden_shed",
+      "enabled": true,
+      "record": {
+        "enabled": true,
+        "alerts": {"pre_capture": 4, "post_capture": 4},
+        "detections": {"pre_capture": 2, "post_capture": 2}
+      },
+      "snapshots": {"enabled": true},
+      "objects": {"track": ["person", "cat", "dog", "bird", "car", "package"]},
+      "zones": {}
+    }
+  }
+}

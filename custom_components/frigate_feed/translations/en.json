@@ -1,0 +1,15 @@
+{
+  "title": "Frigate Feed",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Frigate Feed",
+        "description": "Add the Frigate Feed integration."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only a single Frigate Feed instance is allowed.",
+      "no_frigate": "Set up the Frigate integration first."
+    }
+  }
+}
