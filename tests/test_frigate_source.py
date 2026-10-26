@@ -179,6 +179,9 @@ async def test_pre_capture_seconds(hass: HomeAssistant, fake_frigate: FakeFrigat
     assert source.pre_capture_seconds("garden_shed", "alert") == 4.0
     assert source.pre_capture_seconds("garden_shed", None) == 2.0
     assert isinstance(source.pre_capture_seconds("front_door", "alert"), float)
+    assert source.post_capture_seconds("front_door", "alert") == 8.0
+    assert source.post_capture_seconds("front_door", "detection") == 3.0
+    assert source.post_capture_seconds("unknown") == float(DEFAULT_PRE_CAPTURE_SECONDS)
 
 
 async def test_pre_capture_seconds_fallbacks(

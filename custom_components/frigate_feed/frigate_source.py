@@ -135,11 +135,18 @@ class FrigateSource:
         Uses cameras[camera].record.alerts.pre_capture for severity "alert",
         record.detections.pre_capture otherwise, falling back to DEFAULT_PRE_CAPTURE_SECONDS.
         """
+        return self._capture_seconds(camera, severity, "pre_capture")
+
+    def post_capture_seconds(self, camera: str, severity: str | None = None) -> float:
+        """Recording post-capture seconds for a camera (same lookup as pre_capture_seconds)."""
+        return self._capture_seconds(camera, severity, "post_capture")
+
+    def _capture_seconds(self, camera: str, severity: str | None, field: str) -> float:
         cameras = _as_dict(self.config.get("cameras"))
         record = _as_dict(_as_dict(cameras.get(camera)).get("record"))
         order = ("alerts", "detections") if severity == "alert" else ("detections", "alerts")
         for key in order:
-            value = _as_dict(record.get(key)).get("pre_capture")
+            value = _as_dict(record.get(key)).get(field)
             if isinstance(value, bool):
                 continue
             try:

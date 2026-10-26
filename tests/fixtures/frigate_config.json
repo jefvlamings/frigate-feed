@@ -15,7 +15,7 @@
       "enabled": true,
       "record": {
         "enabled": true,
-        "alerts": {"pre_capture": 5, "post_capture": 5},
+        "alerts": {"pre_capture": 5, "post_capture": 8},
         "detections": {"pre_capture": 3, "post_capture": 3}
       },
       "snapshots": {"enabled": true},
