@@ -27,3 +27,4 @@ config/custom_components/
 
 # Claude Code local state (agent worktrees)
 .claude/
+config/.cache/
