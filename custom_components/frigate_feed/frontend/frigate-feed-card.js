@@ -30,6 +30,23 @@ function formatClipOffset(seconds) {
   return `${m}:${s}`;
 }
 
+// object-position that brings the centre of `box` ([x, y, w, h] fractions of the image)
+// as close to the centre of an object-fit: cover crop as the image edges allow.
+function focusObjectPosition(box, naturalWidth, naturalHeight, frameWidth, frameHeight) {
+  if (!Array.isArray(box) || box.length !== 4) return "";
+  if (!(naturalWidth > 0 && naturalHeight > 0 && frameWidth > 0 && frameHeight > 0)) return "";
+  const scale = Math.max(frameWidth / naturalWidth, frameHeight / naturalHeight);
+  const axis = (start, size, natural, frame) => {
+    const scaled = natural * scale;
+    if (scaled - frame < 1) return 50;
+    const centre = (Number(start) + Number(size) / 2) * scaled;
+    return Math.min(100, Math.max(0, ((centre - frame / 2) / (scaled - frame)) * 100));
+  };
+  const x = axis(box[0], box[2], naturalWidth, frameWidth);
+  const y = axis(box[1], box[3], naturalHeight, frameHeight);
+  return `${x.toFixed(1)}% ${y.toFixed(1)}%`;
+}
+
 function stripUrlQuery(url) {
   return typeof url === "string" ? url.split("?", 1)[0] : "";
 }
@@ -170,13 +187,20 @@ class FrigateFeedCard extends HTMLElement {
         this._openNextInfoItem();
       }
     };
+    this._handleMediaLoad = (ev) => {
+      if (ev.target?.matches?.("img[data-focus-box]")) this._focusThumb(ev.target);
+    };
+    this._thumbResizeObserver =
+      typeof ResizeObserver === "function" ? new ResizeObserver(() => this._focusThumbs()) : null;
     this.attachShadow({ mode: "open" });
-    // Media error events do not bubble; listen in the capture phase for all <img>/<video>.
+    // Media error/load events do not bubble; listen in the capture phase for all <img>/<video>.
     this.shadowRoot.addEventListener("error", this._handleMediaError, true);
+    this.shadowRoot.addEventListener("load", this._handleMediaLoad, true);
   }
 
   connectedCallback() {
     this._isConnected = true;
+    this._thumbResizeObserver?.observe(this);
     if (this._infoDialog.open) window.addEventListener("keydown", this._handleDialogKeyDown);
     this._ensureLiveSubscription();
     if (this._wasDisconnected) {
@@ -188,6 +212,7 @@ class FrigateFeedCard extends HTMLElement {
 
   disconnectedCallback() {
     this._isConnected = false;
+    this._thumbResizeObserver?.disconnect();
     this._wasDisconnected = true;
     window.removeEventListener("keydown", this._handleDialogKeyDown);
     if (this._liveRefreshTimer) {
@@ -1089,6 +1114,24 @@ class FrigateFeedCard extends HTMLElement {
     if (playPromise && typeof playPromise.catch === "function") playPromise.catch(() => {});
   }
 
+  // Thumbnails are cropped to the tile; keep the detected object in view.
+  _focusThumb(img) {
+    if (!img.complete || !img.naturalWidth) return;
+    let box;
+    try {
+      box = JSON.parse(img.dataset.focusBox || "null");
+    } catch (_err) {
+      return;
+    }
+    img.style.objectPosition = focusObjectPosition(
+      box, img.naturalWidth, img.naturalHeight, img.clientWidth, img.clientHeight
+    );
+  }
+
+  _focusThumbs() {
+    this.shadowRoot?.querySelectorAll("li.item img[data-focus-box]").forEach((img) => this._focusThumb(img));
+  }
+
   _labelIcon(label) {
     const icon = this._labelIconName(label);
     const labelText = this._labelText(label);
@@ -1256,7 +1299,9 @@ class FrigateFeedCard extends HTMLElement {
     const listHtml = pagedItems
       .map((item) => {
         const image = item.snapshot_url
-          ? `<img src="${item.snapshot_url}" alt="${item.camera_name}" loading="lazy" />`
+          ? `<img src="${item.snapshot_url}" alt="${item.camera_name}" loading="lazy"${
+              Array.isArray(item.frigate?.box) ? ` data-focus-box="${JSON.stringify(item.frigate.box)}"` : ""
+            } />`
           : `<div class="placeholder">${this._t("no_snapshot")}</div>`;
 
         return `
@@ -1563,6 +1608,7 @@ class FrigateFeedCard extends HTMLElement {
       });
     };
 
+    this._focusThumbs();
     this.shadowRoot.querySelectorAll("li.item").forEach((el) => {
       const id = el.getAttribute("data-id");
       const item = this._items.find((x) => x.id === id);

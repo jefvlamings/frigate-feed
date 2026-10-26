@@ -189,6 +189,7 @@ async def test_review_to_item_linked(hass: HomeAssistant, fake_frigate, source) 
         "label": "person",
         "sub_label": None,
         "score": 0.83,
+        "box": [0.58, 0.52, 0.02, 0.07],
         "objects": ["person"],
         "sub_labels": [],
         "zones": ["driveway"],
@@ -572,3 +573,20 @@ async def test_stop_cancels_clip_ready_timers(hass: HomeAssistant, fake_frigate,
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=30))
     await hass.async_block_till_done()
     assert received == []
+
+
+async def test_review_to_item_snapshot_box(hass: HomeAssistant, source) -> None:
+    """The card centres the thumbnail crop on the snapshot box; invalid boxes are dropped."""
+    start = time.time() - 60
+    review = {"id": "200.0-box1", "camera": "front_door", "start_time": start, "end_time": start + 5,
+              "data": {"detections": ["e1"], "objects": ["person"]}}
+
+    def item_box(box: Any) -> Any:
+        event = {"id": "e1", "label": "person", "start_time": start, "end_time": start + 5,
+                 "has_snapshot": True, "data": {"box": box}}
+        return review_to_item(review, source, {"e1": event}).frigate["box"]
+
+    assert item_box([0.123456, 0.2, 0.3, 0.4]) == [0.1235, 0.2, 0.3, 0.4]
+    for bad in (None, [0.1, 0.2, 0.3], [0.1, 0.2, 0.3, 1.5], ["a", 0, 0, 0], [0.1, 0.2, 0.3, True]):
+        assert item_box(bad) is None, bad
+    assert review_to_item(review, source, {}).frigate["box"] is None

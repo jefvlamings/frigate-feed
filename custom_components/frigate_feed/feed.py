@@ -143,6 +143,17 @@ def _detection(event: dict[str, Any], label: str, clip_start: float) -> dict[str
     }
 
 
+def _snapshot_box(event: dict[str, Any] | None) -> list[float] | None:
+    """The object box on the event snapshot as [x, y, width, height] fractions of the frame."""
+    box = _as_dict(event.get("data")).get("box") if event else None
+    if not isinstance(box, (list, tuple)) or len(box) != 4:
+        return None
+    values = [_as_float(value) for value in box]
+    if any(value is None or not 0.0 <= value <= 1.0 for value in values):
+        return None
+    return [round(value, 4) for value in values]  # type: ignore[arg-type]
+
+
 def _best_event(events: list[dict[str, Any]], label: str) -> dict[str, Any] | None:
     """The detection whose snapshot represents the item: main label first, then score."""
     candidates = [event for event in events if event.get("has_snapshot")]
@@ -240,6 +251,7 @@ def review_to_item(
             "label": raw_label,
             "sub_label": best.get("sub_label") if best else None,
             "score": _event_score(best) if best else None,
+            "box": _snapshot_box(best),
             "objects": [str(obj) for obj in objects],
             "sub_labels": list(sub_labels) if isinstance(sub_labels, list) else [],
             "zones": list(zones) if isinstance(zones, list) else [],

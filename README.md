@@ -83,7 +83,8 @@ Items keep the reolink-feed shape (`id`, `start_ts`, `end_ts`, `duration_s`, `la
 - `labels`: every enabled label in the review item
 - `detections`: its Frigate events (`event_id`, `label`, `frigate_label`, `sub_label`, `score`,
   `start_offset_s` into the clip, `duration_s`, `has_snapshot`), oldest first
-- `frigate`: review id, best event id, severity, camera, objects, sub labels and zones
+- `frigate`: review id, best event id, severity, camera, objects, sub labels, zones and `box`
+  (the object box on the snapshot, `[x, y, w, h]` fractions; the card crops thumbnails around it)
 
 `snapshot_url` and `recording.local_url` are signed Home Assistant paths to the media proxy:
 `/api/frigate_feed/media/{event_id}/snapshot.jpg` (best detection) or
