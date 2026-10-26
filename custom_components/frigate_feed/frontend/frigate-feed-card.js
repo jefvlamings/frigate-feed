@@ -901,7 +901,9 @@ class FrigateFeedCard extends HTMLElement {
         ${
           item && item.recording?.local_url
             ? `
-              <video class="info-video" ${controlsActive ? "controls" : ""} autoplay muted playsinline preload="auto" src="${item.recording.local_url}"></video>
+              <video class="info-video" ${controlsActive ? "controls" : ""} autoplay muted playsinline preload="auto"${
+                item.snapshot_url ? ` poster="${item.snapshot_url}"` : ""
+              } src="${item.recording.local_url}"></video>
             `
             : item && item.snapshot_url
               ? `<img class="info-snapshot" src="${item.snapshot_url}" alt="${item.camera_name || this._t("snapshot")}" loading="lazy" />`
@@ -968,14 +970,17 @@ class FrigateFeedCard extends HTMLElement {
     infoVideoEl.addEventListener("loadeddata", attemptPlay, { once: true });
     infoVideoEl.addEventListener("canplay", attemptPlay, { once: true });
     if (!this._videoControlsActive(currentItem)) {
+      // Show the controls on the playing element; rebuilding it would reload the clip.
       const enableControls = (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
+        infoVideoEl.removeEventListener("click", enableControls);
+        infoVideoEl.removeEventListener("touchstart", enableControls);
         this._videoControlsEnabled.add(currentItem.id);
-        this._updateInfoDialogInPlace();
+        infoVideoEl.controls = true;
       };
-      infoVideoEl.addEventListener("click", enableControls, { once: true });
-      infoVideoEl.addEventListener("touchstart", enableControls, { once: true, passive: false });
+      infoVideoEl.addEventListener("click", enableControls);
+      infoVideoEl.addEventListener("touchstart", enableControls, { passive: false });
     }
   }
 
