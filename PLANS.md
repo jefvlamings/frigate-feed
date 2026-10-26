@@ -53,7 +53,7 @@ Item shape the card depends on (must be preserved):
 
 | Concern | Reolink Feed | Frigate Feed |
 |---|---|---|
-| Detection source | `binary_sensor.*_persoon` etc. state changes, burst merge (20s) | Frigate **events** (`GET /api/events`), one tracked object = one item |
+| Detection source | `binary_sensor.*_persoon` etc. state changes, burst merge (20s) | Frigate **review items** (`GET /api/review`) plus their events, one review item = one item (since v0.2.0; v0.1 used one event per item) |
 | Item id | uuid | Frigate event id (stable, dedupes for free) |
 | Start/end | event bus timestamps | `start_time` / `end_time` (epoch → local ISO) |
 | In-progress | sensor `on` | `end_time == null` → `recording.status = pending` |
@@ -86,7 +86,7 @@ custom_components/frigate_feed/
   config_flow.py     pick Frigate source + options (labels, cameras, retention, max detections)
   const.py           domain, defaults, label mapping tables
   frigate_source.py  NEW: read-only adapter over the Frigate integration (client, config, entities)
-  mqtt_listener.py   NEW: frigate/events -> debounced live-update signal
+  mqtt_listener.py   NEW: frigate/reviews -> debounced live-update signal
   feed.py            NEW (much smaller than reolink's 2100 lines): FrigateFeedManager
   media.py           NEW: authenticated HA proxy view for snapshot/clip + URL signing
   models.py          DetectionItem (copied, + optional `frigate` dict)
@@ -230,11 +230,11 @@ Camera filtering stays as the card's existing `cameras:` YAML option (no backend
 |---|---|
 | Media | Proxy from Frigate via signed HA URLs; no local copies; Frigate retention applies |
 | Item granularity | One Frigate **event** = one item |
-| Burst merge | None; two simultaneous people = two items |
+| Burst merge | Frigate's own grouping: objects detected together on a camera share one review item (v0.2.0) |
 | Delete | Hide only; never modifies Frigate |
 | Labels | Bucket into person/pet/vehicle; drop motion/visitor; raw label kept in `item.frigate` |
 | Connection | Required official Frigate integration; reuse its client/auth and cached config |
-| Live refresh | MQTT `frigate/events` → dispatcher → `frigate_feed/subscribe` WS subscription |
+| Live refresh | MQTT `frigate/reviews` → dispatcher → `frigate_feed/subscribe` WS subscription |
 | Dev env | Local Frigate + fake cameras + mosquitto in docker-compose |
 | Packaging | Separate HACS repo `jefvlamings/frigate-feed`, starting v0.1.0 |
 | Card | One-time fork of reolink-feed card; free to diverge afterwards |

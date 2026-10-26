@@ -23,6 +23,8 @@ DEFAULT_MAX_DETECTIONS = 100
 MIN_MAX_DETECTIONS = 10
 MAX_MAX_DETECTIONS = 2000
 LIST_ITEMS_LIMIT = 200
+# Upper bound on the events fetched to describe the detections of listed review items.
+EVENTS_QUERY_LIMIT = 1000
 
 CLEANUP_INTERVAL_SECONDS = 3600
 LIST_CACHE_SECONDS = 10
@@ -40,9 +42,15 @@ MEDIA_URL = "/api/frigate_feed/media/{event_id}/{kind}"
 MEDIA_KIND_SNAPSHOT = "snapshot.jpg"
 MEDIA_KIND_CLIP = "clip.mp4"
 MEDIA_KINDS: tuple[str, ...] = (MEDIA_KIND_SNAPSHOT, MEDIA_KIND_CLIP)
+# Review item media: the recording clip spanning the review, and Frigate's review thumbnail.
+REVIEW_MEDIA_URL = "/api/frigate_feed/media/review/{review_id}/{kind}"
+REVIEW_MEDIA_KIND_THUMB = "thumb.webp"
+REVIEW_MEDIA_KINDS: tuple[str, ...] = (MEDIA_KIND_CLIP, REVIEW_MEDIA_KIND_THUMB)
 
 SUPPORTED_DETECTION_LABELS: tuple[str, ...] = ("person", "pet", "vehicle")
 DEFAULT_ENABLED_DETECTION_LABELS: tuple[str, ...] = SUPPORTED_DETECTION_LABELS
+# A review item with several labels is shown under the first of these.
+LABEL_PRIORITY: tuple[str, ...] = ("person", "vehicle", "pet")
 
 # Frigate object label -> feed label bucket. Unlisted labels are dropped.
 FRIGATE_LABEL_BUCKETS: dict[str, str] = {
@@ -79,6 +87,8 @@ FRIGATE_LABEL_BUCKETS: dict[str, str] = {
 def bucket_frigate_label(label: str | None) -> str | None:
     """Map a raw Frigate label onto a feed label bucket, or None to drop it."""
     lowered = str(label or "").strip().lower()
+    # Review items list objects confirmed by a sub label as e.g. "person-verified".
+    lowered = lowered.removesuffix("-verified")
     return FRIGATE_LABEL_BUCKETS.get(lowered)
 
 

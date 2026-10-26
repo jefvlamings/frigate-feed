@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -67,23 +68,31 @@ async def test_list_resolve_delete_and_media(
     assert result["retention_hours"] == 24
     items = result["items"]
     ids = [item["id"] for item in items]
-    # package is unmapped and the ~32h old event is outside retention.
-    assert "1793012000.500000-pkg001" not in ids
-    assert "1792900000.000000-old001" not in ids
+    # Items are review items: the package-only one is unmapped and the ~32h old one is
+    # outside retention.
+    assert ids == [
+        "1793016151.200000-rev001",
+        "1793015453.600000-rev002",
+        "1793014800.300000-rev003",
+        "1793012000.600000-rev004",
+        "1793010001.000000-rev006",
+    ]
     assert {item["label"] for item in items} == {"person", "pet", "vehicle"}
     assert [item["start_ts"] for item in items] == sorted(
         (item["start_ts"] for item in items), reverse=True
     )
 
-    ended = next(item for item in items if item["id"] == "1793015453.52062-q2c2mg")
+    ended = next(item for item in items if item["id"] == "1793015453.600000-rev002")
+    event_id = "1793015453.52062-q2c2mg"
     assert ended["recording"]["status"] == "linked"
     assert ended["camera_name"] == "Front Door"
+    assert [detection["event_id"] for detection in ended["detections"]] == [event_id]
     snapshot_url = ended["snapshot_url"]
     clip_url = ended["recording"]["local_url"]
-    assert snapshot_url.startswith(f"/api/frigate_feed/media/{ended['id']}/snapshot.jpg?authSig=")
-    assert clip_url.startswith(f"/api/frigate_feed/media/{ended['id']}/clip.mp4?authSig=")
+    assert snapshot_url.startswith(f"/api/frigate_feed/media/{event_id}/snapshot.jpg?authSig=")
+    assert clip_url.startswith(f"/api/frigate_feed/media/review/{ended['id']}/clip.mp4?authSig=")
 
-    in_progress = next(item for item in items if item["id"] == "1793016151.051489-lzerqk")
+    in_progress = next(item for item in items if item["id"] == "1793016151.200000-rev001")
     assert in_progress["recording"] == {"status": "pending"}
 
     msg = await _ws(
@@ -99,7 +108,7 @@ async def test_list_resolve_delete_and_media(
 
     # Signed media URL works without an auth header and hits Frigate with its auth.
     aioclient_mock.get(
-        f"{FRIGATE_URL}/api/events/{ended['id']}/snapshot.jpg",
+        f"{FRIGATE_URL}/api/events/{event_id}/snapshot.jpg",
         content=b"jpeg-bytes",
         headers={"Content-Type": "image/jpeg"},
     )
@@ -110,6 +119,19 @@ async def test_list_resolve_delete_and_media(
     assert resp.headers["Content-Type"].startswith("image/jpeg")
     unsigned = await http.get(snapshot_url.split("?", 1)[0])
     assert unsigned.status == 401
+
+    # The review clip is the camera recording over the review window plus pre/post capture.
+    review = next(review for review in fake_frigate.reviews if review["id"] == ended["id"])
+    clip_start = math.floor(review["start_time"] - 5)  # front_door alert pre_capture
+    clip_end = math.ceil(review["end_time"] + 8)  # front_door alert post_capture
+    aioclient_mock.get(
+        f"{FRIGATE_URL}/api/front_door/start/{clip_start}/end/{clip_end}/clip.mp4",
+        content=b"mp4-bytes",
+        headers={"Content-Type": "video/mp4"},
+    )
+    resp = await http.get(clip_url)
+    assert resp.status == 200
+    assert await resp.read() == b"mp4-bytes"
 
     msg = await _ws(client, {"type": "frigate_feed/delete_item", "item_id": ended["id"]})
     assert msg["success"], msg
@@ -134,7 +156,7 @@ async def test_subscribe_forwards_feed_updates(
     assert msg["success"], msg
     sub_id = msg["id"]
 
-    payload = {"type": "end", "event_id": "1.0-abc", "camera": "front_door", "label": "person"}
+    payload = {"type": "end", "review_id": "1.0-abc", "camera": "front_door", "label": "person"}
     async_dispatcher_send(hass, SIGNAL_FEED_UPDATED, payload)
     event = await client.receive_json()
     assert event["id"] == sub_id

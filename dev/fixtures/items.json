@@ -18,15 +18,36 @@
         "resolved_at": null
       },
       "frigate": {
-        "event_id": "1793016000.000000-fx0000",
+        "review_id": "1793016000.000000-fx0000",
+        "event_id": "1793016000.000000-fx0000-d0",
+        "severity": "alert",
+        "camera": "front_yard",
         "label": "person",
         "sub_label": null,
         "score": 0.81,
+        "objects": [
+          "person"
+        ],
+        "sub_labels": [],
         "zones": [
           "porch"
-        ],
-        "camera": "front_yard"
-      }
+        ]
+      },
+      "labels": [
+        "person"
+      ],
+      "detections": [
+        {
+          "event_id": "1793016000.000000-fx0000-d0",
+          "label": "person",
+          "frigate_label": "person",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 0,
+          "duration_s": 6,
+          "has_snapshot": true
+        }
+      ]
     },
     {
       "id": "1793015880.000000-fx0001",
@@ -46,13 +67,34 @@
         "resolved_at": "2026-10-26T12:00:00+00:00"
       },
       "frigate": {
-        "event_id": "1793015880.000000-fx0001",
+        "review_id": "1793015880.000000-fx0001",
+        "event_id": "1793015880.000000-fx0001-d0",
+        "severity": "alert",
+        "camera": "front_yard",
         "label": "dog",
         "sub_label": null,
         "score": 0.77,
-        "zones": [],
-        "camera": "front_yard"
-      }
+        "objects": [
+          "dog"
+        ],
+        "sub_labels": [],
+        "zones": []
+      },
+      "labels": [
+        "pet"
+      ],
+      "detections": [
+        {
+          "event_id": "1793015880.000000-fx0001-d0",
+          "label": "pet",
+          "frigate_label": "dog",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 5.0,
+          "duration_s": 6,
+          "has_snapshot": true
+        }
+      ]
     },
     {
       "id": "1793015820.000000-fx0002",
@@ -72,22 +114,65 @@
         "resolved_at": "2026-10-26T12:00:00+00:00"
       },
       "frigate": {
-        "event_id": "1793015820.000000-fx0002",
+        "review_id": "1793015820.000000-fx0002",
+        "event_id": "1793015820.000000-fx0002-d0",
+        "severity": "alert",
+        "camera": "front_yard",
         "label": "person",
         "sub_label": null,
         "score": 0.9,
+        "objects": [
+          "dog",
+          "person"
+        ],
+        "sub_labels": [],
         "zones": [
           "porch"
-        ],
-        "camera": "front_yard"
-      }
+        ]
+      },
+      "labels": [
+        "person",
+        "pet"
+      ],
+      "detections": [
+        {
+          "event_id": "1793015820.000000-fx0002-d0",
+          "label": "person",
+          "frigate_label": "person",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 3.0,
+          "duration_s": 6,
+          "has_snapshot": true
+        },
+        {
+          "event_id": "1793015820.000000-fx0002-d1",
+          "label": "pet",
+          "frigate_label": "dog",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 9.5,
+          "duration_s": 6,
+          "has_snapshot": true
+        },
+        {
+          "event_id": "1793015820.000000-fx0002-d2",
+          "label": "person",
+          "frigate_label": "person",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 21.0,
+          "duration_s": 6,
+          "has_snapshot": true
+        }
+      ]
     },
     {
       "id": "1793015700.000000-fx0003",
       "start_ts": "2026-10-26T11:55:00+00:00",
       "end_ts": "2026-10-26T11:55:40+00:00",
       "duration_s": 40,
-      "label": "vehicle",
+      "label": "person",
       "source_entity_id": "binary_sensor.driveway_car_occupancy",
       "camera_name": "Driveway",
       "snapshot_url": "driveway_vehicle.svg",
@@ -100,15 +185,48 @@
         "resolved_at": "2026-10-26T12:00:00+00:00"
       },
       "frigate": {
-        "event_id": "1793015700.000000-fx0003",
+        "review_id": "1793015700.000000-fx0003",
+        "event_id": "1793015700.000000-fx0003-d0",
+        "severity": "alert",
+        "camera": "driveway",
         "label": "car",
         "sub_label": null,
         "score": 0.88,
+        "objects": [
+          "car",
+          "person"
+        ],
+        "sub_labels": [],
         "zones": [
           "street"
-        ],
-        "camera": "driveway"
-      }
+        ]
+      },
+      "labels": [
+        "person",
+        "vehicle"
+      ],
+      "detections": [
+        {
+          "event_id": "1793015700.000000-fx0003-d0",
+          "label": "vehicle",
+          "frigate_label": "car",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 4.0,
+          "duration_s": 6,
+          "has_snapshot": true
+        },
+        {
+          "event_id": "1793015700.000000-fx0003-d1",
+          "label": "person",
+          "frigate_label": "person",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 12.0,
+          "duration_s": 6,
+          "has_snapshot": true
+        }
+      ]
     },
     {
       "id": "1793010300.000000-fx0004",
@@ -128,13 +246,34 @@
         "resolved_at": "2026-10-26T12:00:00+00:00"
       },
       "frigate": {
-        "event_id": "1793010300.000000-fx0004",
+        "review_id": "1793010300.000000-fx0004",
+        "event_id": "1793010300.000000-fx0004-d0",
+        "severity": "alert",
+        "camera": "driveway",
         "label": "cat",
         "sub_label": null,
         "score": 0.71,
-        "zones": [],
-        "camera": "driveway"
-      }
+        "objects": [
+          "dog"
+        ],
+        "sub_labels": [],
+        "zones": []
+      },
+      "labels": [
+        "pet"
+      ],
+      "detections": [
+        {
+          "event_id": "1793010300.000000-fx0004-d0",
+          "label": "pet",
+          "frigate_label": "dog",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 0,
+          "duration_s": 6,
+          "has_snapshot": true
+        }
+      ]
     },
     {
       "id": "1793005200.000000-fx0005",
@@ -154,13 +293,34 @@
         "resolved_at": "2026-10-26T12:00:00+00:00"
       },
       "frigate": {
-        "event_id": "1793005200.000000-fx0005",
+        "review_id": "1793005200.000000-fx0005",
+        "event_id": "1793005200.000000-fx0005-d0",
+        "severity": "alert",
+        "camera": "driveway",
         "label": "person",
         "sub_label": null,
         "score": 0.86,
-        "zones": [],
-        "camera": "driveway"
-      }
+        "objects": [
+          "person"
+        ],
+        "sub_labels": [],
+        "zones": []
+      },
+      "labels": [
+        "person"
+      ],
+      "detections": [
+        {
+          "event_id": "1793005200.000000-fx0005-d0",
+          "label": "person",
+          "frigate_label": "person",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 5.0,
+          "duration_s": 6,
+          "has_snapshot": true
+        }
+      ]
     },
     {
       "id": "1793004960.000000-fx0006",
@@ -180,15 +340,36 @@
         "resolved_at": "2026-10-26T12:00:00+00:00"
       },
       "frigate": {
-        "event_id": "1793004960.000000-fx0006",
+        "review_id": "1793004960.000000-fx0006",
+        "event_id": "1793004960.000000-fx0006-d0",
+        "severity": "alert",
+        "camera": "driveway",
         "label": "truck",
         "sub_label": null,
         "score": 0.65,
+        "objects": [
+          "car"
+        ],
+        "sub_labels": [],
         "zones": [
           "street"
-        ],
-        "camera": "driveway"
-      }
+        ]
+      },
+      "labels": [
+        "vehicle"
+      ],
+      "detections": [
+        {
+          "event_id": "1793004960.000000-fx0006-d0",
+          "label": "vehicle",
+          "frigate_label": "car",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 0,
+          "duration_s": 6,
+          "has_snapshot": true
+        }
+      ]
     },
     {
       "id": "1792994400.000000-fx0007",
@@ -208,13 +389,34 @@
         "resolved_at": "2026-10-26T12:00:00+00:00"
       },
       "frigate": {
-        "event_id": "1792994400.000000-fx0007",
+        "review_id": "1792994400.000000-fx0007",
+        "event_id": "1792994400.000000-fx0007-d0",
+        "severity": "alert",
+        "camera": "front_yard",
         "label": "bicycle",
         "sub_label": null,
         "score": 0.7,
-        "zones": [],
-        "camera": "front_yard"
-      }
+        "objects": [
+          "car"
+        ],
+        "sub_labels": [],
+        "zones": []
+      },
+      "labels": [
+        "vehicle"
+      ],
+      "detections": [
+        {
+          "event_id": "1792994400.000000-fx0007-d0",
+          "label": "vehicle",
+          "frigate_label": "car",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 5.0,
+          "duration_s": 6,
+          "has_snapshot": true
+        }
+      ]
     },
     {
       "id": "1792980000.000000-fx0008",
@@ -234,15 +436,36 @@
         "resolved_at": "2026-10-26T12:00:00+00:00"
       },
       "frigate": {
-        "event_id": "1792980000.000000-fx0008",
+        "review_id": "1792980000.000000-fx0008",
+        "event_id": "1792980000.000000-fx0008-d0",
+        "severity": "alert",
+        "camera": "front_yard",
         "label": "person",
         "sub_label": null,
         "score": 0.83,
+        "objects": [
+          "person"
+        ],
+        "sub_labels": [],
         "zones": [
           "porch"
-        ],
-        "camera": "front_yard"
-      }
+        ]
+      },
+      "labels": [
+        "person"
+      ],
+      "detections": [
+        {
+          "event_id": "1792980000.000000-fx0008-d0",
+          "label": "person",
+          "frigate_label": "person",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 0,
+          "duration_s": 6,
+          "has_snapshot": true
+        }
+      ]
     },
     {
       "id": "1792965600.000000-fx0009",
@@ -262,13 +485,34 @@
         "resolved_at": "2026-10-26T12:00:00+00:00"
       },
       "frigate": {
-        "event_id": "1792965600.000000-fx0009",
+        "review_id": "1792965600.000000-fx0009",
+        "event_id": "1792965600.000000-fx0009-d0",
+        "severity": "alert",
+        "camera": "driveway",
         "label": "dog",
         "sub_label": null,
         "score": 0.79,
-        "zones": [],
-        "camera": "driveway"
-      }
+        "objects": [
+          "dog"
+        ],
+        "sub_labels": [],
+        "zones": []
+      },
+      "labels": [
+        "pet"
+      ],
+      "detections": [
+        {
+          "event_id": "1792965600.000000-fx0009-d0",
+          "label": "pet",
+          "frigate_label": "dog",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 5.0,
+          "duration_s": 6,
+          "has_snapshot": true
+        }
+      ]
     },
     {
       "id": "1792951200.000000-fx0010",
@@ -288,15 +532,36 @@
         "resolved_at": "2026-10-26T12:00:00+00:00"
       },
       "frigate": {
-        "event_id": "1792951200.000000-fx0010",
+        "review_id": "1792951200.000000-fx0010",
+        "event_id": "1792951200.000000-fx0010-d0",
+        "severity": "alert",
+        "camera": "front_yard",
         "label": "car",
         "sub_label": null,
         "score": 0.92,
+        "objects": [
+          "car"
+        ],
+        "sub_labels": [],
         "zones": [
           "street"
-        ],
-        "camera": "front_yard"
-      }
+        ]
+      },
+      "labels": [
+        "vehicle"
+      ],
+      "detections": [
+        {
+          "event_id": "1792951200.000000-fx0010-d0",
+          "label": "vehicle",
+          "frigate_label": "car",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 5.0,
+          "duration_s": 6,
+          "has_snapshot": true
+        }
+      ]
     },
     {
       "id": "1792936800.000000-fx0011",
@@ -316,13 +581,34 @@
         "resolved_at": "2026-10-26T12:00:00+00:00"
       },
       "frigate": {
-        "event_id": "1792936800.000000-fx0011",
+        "review_id": "1792936800.000000-fx0011",
+        "event_id": "1792936800.000000-fx0011-d0",
+        "severity": "alert",
+        "camera": "driveway",
         "label": "person",
         "sub_label": null,
         "score": 0.87,
-        "zones": [],
-        "camera": "driveway"
-      }
+        "objects": [
+          "person"
+        ],
+        "sub_labels": [],
+        "zones": []
+      },
+      "labels": [
+        "person"
+      ],
+      "detections": [
+        {
+          "event_id": "1792936800.000000-fx0011-d0",
+          "label": "person",
+          "frigate_label": "person",
+          "sub_label": null,
+          "score": 0.8,
+          "start_offset_s": 5.0,
+          "duration_s": 6,
+          "has_snapshot": true
+        }
+      ]
     }
   ],
   "enabled_labels": [

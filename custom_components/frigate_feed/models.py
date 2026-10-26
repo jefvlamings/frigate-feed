@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
 
 
 @dataclass(slots=True)
 class DetectionItem:
-    """Normalized timeline item (one Frigate event).
+    """Normalized timeline item (one Frigate review item).
 
-    The shape matches reolink-feed so the card can stay identical. `snapshot_url` and
+    The shape matches reolink-feed so the card can stay close to it; `label` is the
+    main label, `labels` every label in the review and `detections` its Frigate events. `snapshot_url` and
     `recording["local_url"]` hold unsigned media proxy paths; they are signed per
     websocket response by `media.sign_item_urls`.
     """
@@ -26,6 +27,8 @@ class DetectionItem:
     snapshot_url: str | None
     recording: dict[str, Any]
     frigate: dict[str, Any] | None = None
+    labels: list[str] = field(default_factory=list)
+    detections: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def start_dt(self) -> datetime:
@@ -51,4 +54,6 @@ class DetectionItem:
             snapshot_url=data.get("snapshot_url"),
             recording=data.get("recording", {"status": "pending"}),
             frigate=data.get("frigate"),
+            labels=list(data["labels"]) if "labels" in data else [data["label"]],
+            detections=list(data.get("detections") or []),
         )

@@ -18,6 +18,18 @@ function slugifyCardValue(value) {
     .replace(/^_+|_+$/g, "");
 }
 
+function itemLabels(item) {
+  const labels = Array.isArray(item?.labels) && item.labels.length ? item.labels : [item?.label];
+  return [...new Set(labels.map((label) => normalizeCardLabel(label)).filter(Boolean))];
+}
+
+function formatClipOffset(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const m = Math.floor(total / 60);
+  const s = String(total % 60).padStart(2, "0");
+  return `${m}:${s}`;
+}
+
 function stripUrlQuery(url) {
   return typeof url === "string" ? url.split("?", 1)[0] : "";
 }
@@ -35,6 +47,8 @@ const CARD_I18N = {
     timestamp: "Timestamp",
     duration: "Duration",
     detection: "Detection",
+    detections: "Detections",
+    seek_to_detection: "Jump to this detection",
     history: "History",
     logbook: "Logbook",
     recording: "Recording",
@@ -75,6 +89,8 @@ const CARD_I18N = {
     timestamp: "Tijdstip",
     duration: "Duur",
     detection: "Detectie",
+    detections: "Detecties",
+    seek_to_detection: "Spring naar deze detectie",
     history: "Geschiedenis",
     logbook: "Logboek",
     recording: "Opname",
@@ -324,8 +340,7 @@ class FrigateFeedCard extends HTMLElement {
   _applyFilters() {
     const cameraFilter = new Set((this._config?.cameras || []).map((v) => String(v).toLowerCase()));
     this._filteredItems = this._items.filter((item) => {
-      const label = normalizeCardLabel(item.label);
-      if (!this._activeLabels.has(label)) return false;
+      if (!item.labels.some((label) => this._activeLabels.has(label))) return false;
       if (!cameraFilter.size) return true;
       // Accept both the display name and the Frigate camera id in the `cameras:` option.
       return (
@@ -418,6 +433,8 @@ class FrigateFeedCard extends HTMLElement {
     this._items = (result?.items || []).map((item) => ({
       ...item,
       label: normalizeCardLabel(item.label),
+      labels: itemLabels(item),
+      detections: Array.isArray(item.detections) ? item.detections : [],
     }));
     const retentionHours = Number.parseInt(String(result?.retention_hours ?? ""), 10);
     if (Number.isFinite(retentionHours) && retentionHours > 0) {
@@ -750,6 +767,15 @@ class FrigateFeedCard extends HTMLElement {
         await this._shareOrDownloadAsset(url, fileName, label, kind);
       });
     });
+    this.shadowRoot.querySelectorAll(".detection-chip[data-seek]").forEach((el) => {
+      if (el.dataset.boundClick === "1") return;
+      el.dataset.boundClick = "1";
+      el.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this._seekInfoVideo(el.getAttribute("data-seek"));
+      });
+    });
     this.shadowRoot.querySelectorAll(".internal-nav-link[data-nav-path]").forEach((el) => {
       if (el.dataset.boundClick === "1") return;
       el.dataset.boundClick = "1";
@@ -932,6 +958,7 @@ class FrigateFeedCard extends HTMLElement {
     const titleTextEl = this.shadowRoot.querySelector(".info-title-text");
     const mediaSlotEl = this.shadowRoot.querySelector(".info-media-slot");
     const detectionValueEl = this.shadowRoot.querySelector(".info-detection-value");
+    const detectionsRowEl = this.shadowRoot.querySelector(".info-detections-row");
     const startEndEl = this.shadowRoot.querySelector(".info-start-end");
     const downloadsSlotEl = this.shadowRoot.querySelector(".info-downloads-slot");
     const linksValueEl = this.shadowRoot.querySelector(".info-links");
@@ -943,7 +970,8 @@ class FrigateFeedCard extends HTMLElement {
     titleIconEl?.setAttribute("icon", this._labelIconName(infoItem.label));
     if (titleTextEl) titleTextEl.textContent = this._infoHeaderTitle(infoItem);
     if (mediaSlotEl && !keepMedia) mediaSlotEl.innerHTML = this._buildInfoMediaHtml(infoItem);
-    if (detectionValueEl) detectionValueEl.textContent = this._labelText(infoItem.label);
+    if (detectionValueEl) detectionValueEl.textContent = this._labelsText(infoItem);
+    if (detectionsRowEl) detectionsRowEl.outerHTML = this._buildInfoDetectionsRowHtml(infoItem);
     if (startEndEl) startEndEl.textContent = this._formatStartEndLine(infoItem);
     if (linksValueEl) linksValueEl.innerHTML = this._buildInfoLinksHtml(infoItem);
     if (downloadsSlotEl) downloadsSlotEl.innerHTML = this._buildInfoDownloadsHtml(infoItem);
@@ -988,8 +1016,8 @@ class FrigateFeedCard extends HTMLElement {
   }
 
   _mediaFileDisplayPath(item) {
-    const eventId = item?.frigate?.event_id;
-    const fileName = eventId ? String(eventId) : this._recordingFilename(item);
+    const frigateId = item?.frigate?.review_id || item?.frigate?.event_id;
+    const fileName = frigateId ? String(frigateId) : this._recordingFilename(item);
     return `${this._mediaFolderDisplayPath(item)}/${fileName}`;
   }
 
@@ -1015,6 +1043,50 @@ class FrigateFeedCard extends HTMLElement {
       return snapshotUrl;
     }
     return "#";
+  }
+
+  _labelsText(item) {
+    return itemLabels(item).map((label) => this._labelText(label)).join(", ");
+  }
+
+  _labelIcons(item) {
+    return itemLabels(item).map((label) => this._labelIcon(label)).join("");
+  }
+
+  _buildInfoDetectionsRowHtml(item) {
+    const detections = Array.isArray(item?.detections) ? item.detections : [];
+    // A single detection is the item itself; only grouped items get seek chips.
+    if (detections.length < 2) return `<div class="info-row info-detections-row" hidden></div>`;
+    const seekable = item.recording?.status === "linked" && Boolean(item.recording?.local_url);
+    const chips = detections
+      .map((detection) => {
+        const offset = Number(detection.start_offset_s);
+        const label = normalizeCardLabel(detection.label);
+        const title = `${this._labelText(label)}${detection.sub_label ? ` (${detection.sub_label})` : ""}`;
+        return `
+          <button class="detection-chip" type="button" data-seek="${Number.isFinite(offset) ? offset : 0}"
+            title="${title} - ${this._t("seek_to_detection")}" aria-label="${title} ${formatClipOffset(offset)}"
+            ${seekable ? "" : "disabled"}>
+            <ha-icon icon="${this._labelIconName(label)}"></ha-icon><span>${formatClipOffset(offset)}</span>
+          </button>
+        `;
+      })
+      .join("");
+    return `<div class="info-row info-detections-row"><span class="info-label">${this._t("detections")}:</span><span class="info-value detection-chips">${chips}</span></div>`;
+  }
+
+  _seekInfoVideo(seconds) {
+    const videoEl = this.shadowRoot?.querySelector("video.info-video");
+    if (!videoEl) return;
+    const duration = Number(videoEl.duration);
+    const target = Math.max(0, Number(seconds) - 1);
+    try {
+      videoEl.currentTime = Number.isFinite(duration) && duration > 0 ? Math.min(target, Math.max(0, duration - 0.25)) : target;
+    } catch (_err) {
+      return;
+    }
+    const playPromise = videoEl.play();
+    if (playPromise && typeof playPromise.catch === "function") playPromise.catch(() => {});
   }
 
   _labelIcon(label) {
@@ -1192,7 +1264,7 @@ class FrigateFeedCard extends HTMLElement {
             <button class="thumb" aria-label="${this._t("open_recording_preview")}">
               ${image}
               <span class="overlay top-left">
-                ${this._labelIcon(item.label)}
+                ${this._labelIcons(item)}
               </span>
               <span class="overlay bottom-left line2">${this._formatTime(item.start_ts)} (${this._formatDuration(item.duration_s)})</span>
             </button>
@@ -1243,7 +1315,8 @@ class FrigateFeedCard extends HTMLElement {
               ${this._currentInfoItemIndex() >= this._filteredItems.length - 1 ? "disabled" : ""}
             ><span>${this._t("next")}</span><ha-icon icon="mdi:chevron-right"></ha-icon></button>
           </div>
-          <div class="info-row"><span class="info-label">${this._t("detection")}:</span><span class="info-value info-detection-value">${this._labelText(infoItem.label)}</span></div>
+          <div class="info-row"><span class="info-label">${this._t("detection")}:</span><span class="info-value info-detection-value">${this._labelsText(infoItem)}</span></div>
+          ${this._buildInfoDetectionsRowHtml(infoItem)}
           <div class="info-row"><span class="info-label">${this._t("event")}:</span><span class="info-value info-start-end">${this._formatStartEndLine(infoItem)}</span></div>
           <div class="info-row"><span class="info-label">${this._t("links")}:</span><span class="info-value info-links">${this._buildInfoLinksHtml(infoItem)}</span></div>
           <div class="info-row"><span class="info-label">${this._t("download")}:</span><span class="info-value info-downloads-slot">${infoDownloadsHtml}</span></div>
@@ -1336,6 +1409,12 @@ class FrigateFeedCard extends HTMLElement {
           user-select: text;
           -webkit-user-select: text;
         }
+        .detection-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+        .detection-chip { border: 1px solid rgba(255,255,255,0.22); background: transparent; color: var(--primary-text-color); border-radius: 999px; height: 26px; padding: 0 9px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+        .detection-chip ha-icon { --mdc-icon-size: 14px; }
+        .detection-chip:hover:not([disabled]) { background: rgba(255,255,255,0.08); border-color: #fff; }
+        .detection-chip[disabled] { opacity: 0.5; cursor: default; }
+        .info-row[hidden] { display: none; }
         .info-row { display: flex; align-items: baseline; gap: 6px; font-size: 13px; color: var(--primary-text-color); line-height: 1.35; }
         .info-label { font-weight: 500; color: inherit; }
         .info-value { color: inherit; }

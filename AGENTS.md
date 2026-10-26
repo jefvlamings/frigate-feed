@@ -4,9 +4,9 @@
 - `custom_components/frigate_feed/`: Home Assistant custom integration backend.
   - `__init__.py`: setup/unload, WebSocket commands, card static path + Lovelace resource.
   - `frigate_source.py`: read-only adapter over the official Frigate integration (`hass.data["frigate"]`).
-  - `feed.py`: Frigate event -> feed item mapping, list cache, hidden items.
-  - `media.py`: authenticated snapshot/clip proxy + URL signing.
-  - `mqtt_listener.py`: `frigate/events` -> debounced live-update signal.
+  - `feed.py`: Frigate review item (+ its events) -> feed item mapping, list cache, hidden items.
+  - `media.py`: authenticated snapshot/review clip/thumbnail proxy + URL signing.
+  - `mqtt_listener.py`: `frigate/reviews` -> debounced live-update signal.
   - `models.py`, `storage.py`, `const.py`: data model, persistence, constants.
   - `frontend/frigate-feed-card.js`: bundled Lovelace card served by the integration.
   - `manifest.json`, `strings.json`, `translations/`, `config_flow.py`: HA integration metadata/UI.

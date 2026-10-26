@@ -2,8 +2,9 @@
 
 `fake_frigate` emulates what the official Frigate integration leaves in hass.data:
     hass.data["frigate"][entry_id] = {"client": FakeFrigateClient, "config": <api/config>}
-Fixture events are rebased so the newest event started 30s ago (offsets preserved);
-the oldest fixture event is ~32h older and therefore outside the default 24h retention.
+Fixture events and review items are rebased together so the newest event started 30s
+ago (offsets preserved); the oldest fixture event and review item are ~32h older and
+therefore outside the default 24h retention.
 """
 
 from __future__ import annotations
@@ -50,6 +51,7 @@ class FakeFrigateClient:
 
     events: list[dict[str, Any]]
     config: dict[str, Any]
+    reviews: list[dict[str, Any]] = field(default_factory=list)
     fail: bool = False
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
 
@@ -104,6 +106,55 @@ class FakeFrigateClient:
                 return copy.deepcopy(event)
         raise FakeFrigateClientError("Event not found")
 
+    async def async_get_reviews(
+        self,
+        cameras: list[str] | None = None,
+        labels: list[str] | None = None,
+        zones: list[str] | None = None,
+        severity: str | None = None,
+        after: float | None = None,
+        before: float | None = None,
+        limit: int | None = None,
+        reviewed: bool | None = None,
+        decode_json: bool = True,
+    ) -> list[dict[str, Any]]:
+        self.calls.append(
+            (
+                "async_get_reviews",
+                {"cameras": cameras, "labels": labels, "after": after, "before": before, "limit": limit},
+            )
+        )
+        if self.fail:
+            raise FakeFrigateClientError("frigate unavailable")
+        result = []
+        for review in self.reviews:
+            if cameras and review["camera"] not in cameras:
+                continue
+            if labels and not set(labels) & set(review["data"]["objects"]):
+                continue
+            if after is not None and review["start_time"] < after:
+                continue
+            if before is not None and review["start_time"] > before:
+                continue
+            result.append(copy.deepcopy(review))
+        result.sort(key=lambda review: review["start_time"], reverse=True)
+        if limit is not None:
+            result = result[:limit]
+        return result
+
+    async def api_wrapper(self, method: str, url: str, **kwargs: Any) -> Any:
+        """Only GET /api/review/{id} is used (FrigateSource.async_get_review)."""
+        self.calls.append(("api_wrapper", {"method": method, "url": url}))
+        if self.fail:
+            raise FakeFrigateClientError("frigate unavailable")
+        prefix = f"{FRIGATE_URL}/api/review/"
+        if method == "get" and url.startswith(prefix):
+            review_id = url[len(prefix) :]
+            for review in self.reviews:
+                if review["id"] == review_id:
+                    return copy.deepcopy(review)
+        raise FakeFrigateClientError("Review not found")
+
     def get_auth_headers(self) -> dict[str, str]:
         return {"Authorization": "Bearer test-token"}
 
@@ -114,16 +165,20 @@ class FakeFrigate:
     client: FakeFrigateClient
     config: dict[str, Any]
     events: list[dict[str, Any]]
+    reviews: list[dict[str, Any]]
 
 
 def _load_json(name: str) -> Any:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
-def rebase_events(events: list[dict[str, Any]], newest_start: float) -> list[dict[str, Any]]:
-    """Shift event times so the newest event starts at `newest_start`."""
+def rebase_events(
+    events: list[dict[str, Any]], newest_start: float, latest: float | None = None
+) -> list[dict[str, Any]]:
+    """Shift event (or review item) times so `latest` (default: the newest start) moves to `newest_start`."""
     shifted = copy.deepcopy(events)
-    latest = max(event["start_time"] for event in shifted)
+    if latest is None:
+        latest = max(event["start_time"] for event in shifted)
     delta = newest_start - latest
     for event in shifted:
         event["start_time"] += delta
@@ -143,8 +198,19 @@ def frigate_events() -> list[dict[str, Any]]:
 
 
 @pytest.fixture
+def frigate_reviews(frigate_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Review item fixtures, shifted by the same amount as the events."""
+    raw_latest = max(event["start_time"] for event in _load_json("frigate_events.json"))
+    newest = max(event["start_time"] for event in frigate_events)
+    return rebase_events(_load_json("frigate_reviews.json"), newest, raw_latest)
+
+
+@pytest.fixture
 def fake_frigate(
-    hass: HomeAssistant, frigate_config: dict[str, Any], frigate_events: list[dict[str, Any]]
+    hass: HomeAssistant,
+    frigate_config: dict[str, Any],
+    frigate_events: list[dict[str, Any]],
+    frigate_reviews: list[dict[str, Any]],
 ) -> FakeFrigate:
     """Install a loaded Frigate integration entry with fake runtime data."""
     entry = MockConfigEntry(
@@ -155,6 +221,8 @@ def fake_frigate(
     )
     entry.add_to_hass(hass)
     entry.mock_state(hass, ConfigEntryState.LOADED)
-    client = FakeFrigateClient(events=frigate_events, config=frigate_config)
+    client = FakeFrigateClient(events=frigate_events, config=frigate_config, reviews=frigate_reviews)
     hass.data.setdefault("frigate", {})[entry.entry_id] = {"client": client, "config": frigate_config}
-    return FakeFrigate(entry=entry, client=client, config=frigate_config, events=frigate_events)
+    return FakeFrigate(
+        entry=entry, client=client, config=frigate_config, events=frigate_events, reviews=frigate_reviews
+    )
