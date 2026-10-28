@@ -82,10 +82,9 @@ async def test_get_source_no_frigate_domain_data(
 
 async def test_properties_read_live(hass: HomeAssistant, fake_frigate: FakeFrigate) -> None:
     source = _source(hass)
-    new_config = {"mqtt": {"topic_prefix": "cams"}, "cameras": {"b": {}, "a": {}}}
+    new_config = {"cameras": {"b": {}, "a": {}}}
     _runtime(hass)["config"] = new_config
     assert source.config is new_config
-    assert source.topic_prefix == "cams"
     assert source.camera_names() == ["a", "b"]
     hass.data["frigate"].pop(FRIGATE_ENTRY_ID)
     assert source.config == {}
@@ -113,24 +112,6 @@ async def test_base_url_entry_removed(hass: HomeAssistant, fake_frigate: FakeFri
     await hass.config_entries.async_remove(FRIGATE_ENTRY_ID)
     with pytest.raises(FrigateNotReady):
         source.base_url  # noqa: B018
-
-
-@pytest.mark.parametrize(
-    ("config", "expected"),
-    [
-        ({"mqtt": {"topic_prefix": "frigate"}}, "frigate"),
-        ({"mqtt": {"topic_prefix": "nvr"}}, "nvr"),
-        ({"mqtt": {}}, "frigate"),
-        ({"mqtt": {"topic_prefix": ""}}, "frigate"),
-        ({"mqtt": None}, "frigate"),
-        ({}, "frigate"),
-    ],
-)
-async def test_topic_prefix(
-    hass: HomeAssistant, fake_frigate: FakeFrigate, config: dict[str, Any], expected: str
-) -> None:
-    _runtime(hass)["config"] = config
-    assert _source(hass).topic_prefix == expected
 
 
 async def test_auth_headers(hass: HomeAssistant, fake_frigate: FakeFrigate) -> None:

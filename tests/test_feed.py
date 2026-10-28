@@ -152,9 +152,11 @@ async def test_review_to_item_linked(hass: HomeAssistant, fake_frigate, source) 
     assert item.labels == ["person"]
     assert item.camera_name == "Front Door"
     assert item.source_entity_id == "binary_sensor.front_door_person_occupancy"
-    assert item.snapshot_url == f"/api/frigate_feed/media/{PERSON_EVENT}/snapshot.jpg"
+    # Media of an ended review item is versioned by its end time (browser-cacheable).
+    version = int(review["end_time"])
+    assert item.snapshot_url == f"/api/frigate_feed/media/{PERSON_EVENT}/snapshot.jpg?v={version}"
     assert item.thumbnail_url == (
-        f"/api/frigate_feed/media/{PERSON_EVENT}/snapshot.jpg?crop=1&bbox=0&height=400&quality=80"
+        f"/api/frigate_feed/media/{PERSON_EVENT}/snapshot.jpg?crop=1&bbox=0&height=400&quality=80&v={version}"
     )
     assert item.start_dt == dt_util.utc_from_timestamp(review["start_time"])
     assert item.start_dt.utcoffset() == dt_util.as_local(item.start_dt).utcoffset()
@@ -219,6 +221,8 @@ async def test_review_to_item_statuses_and_buckets(hass: HomeAssistant, fake_fri
     assert pending.recording == {"status": "pending"}
     assert pending.end_ts is None
     assert pending.duration_s is None
+    assert "v=" not in pending.snapshot_url
+    assert "v=" not in pending.thumbnail_url
 
     bird = _item(fake_frigate, source, BIRD_ID)
     assert bird.label == "pet"
@@ -231,12 +235,14 @@ async def test_review_to_item_statuses_and_buckets(hass: HomeAssistant, fake_fri
     car = _item(fake_frigate, source, CAR_ID)
     assert car.labels == ["vehicle"]
     assert [detection["event_id"] for detection in car.detections] == [CAR_EVENT]
-    assert car.snapshot_url == f"/api/frigate_feed/media/{CAR_EVENT}/snapshot.jpg"
+    car_version = int(_review(fake_frigate, CAR_ID)["end_time"])
+    assert car.snapshot_url == f"/api/frigate_feed/media/{CAR_EVENT}/snapshot.jpg?v={car_version}"
     assert car.recording["status"] == "linked"
 
     # No detection with a snapshot: fall back to the review thumbnail.
     dog = _item(fake_frigate, source, DOG_ID)
-    assert dog.snapshot_url == f"/api/frigate_feed/media/review/{DOG_ID}/thumb.webp"
+    dog_version = int(_review(fake_frigate, DOG_ID)["end_time"])
+    assert dog.snapshot_url == f"/api/frigate_feed/media/review/{DOG_ID}/thumb.webp?v={dog_version}"
     assert dog.thumbnail_url is None
     assert dog.source_entity_id == "camera.front_door"
     assert dog.frigate["sub_labels"] == ["Rex"]
@@ -269,7 +275,8 @@ async def test_review_to_item_groups_detections(hass: HomeAssistant, fake_frigat
     assert item.labels == ["person", "vehicle", "pet"]
     assert item.label == "person"
     # The best snapshot prefers the main label over a higher score.
-    assert item.snapshot_url == "/api/frigate_feed/media/e-person/snapshot.jpg"
+    version = int(start + 40)
+    assert item.snapshot_url == f"/api/frigate_feed/media/e-person/snapshot.jpg?v={version}"
     assert item.frigate["event_id"] == "e-person"
     clip_start = math.floor(start - 5)
     assert [(d["event_id"], d["label"]) for d in item.detections] == [
@@ -283,14 +290,14 @@ async def test_review_to_item_groups_detections(hass: HomeAssistant, fake_frigat
     # Only wanted labels count: the main label and snapshot follow.
     pets_and_cars = review_to_item(review, source, events, {"pet", "vehicle"})
     assert pets_and_cars.labels == ["vehicle", "pet"]
-    assert pets_and_cars.snapshot_url == "/api/frigate_feed/media/e-car/snapshot.jpg"
+    assert pets_and_cars.snapshot_url == f"/api/frigate_feed/media/e-car/snapshot.jpg?v={version}"
     assert [d["event_id"] for d in pets_and_cars.detections] == ["e-dog", "e-car"]
 
     # Without event details the review objects still give the labels.
     bare = review_to_item(review, source, {})
     assert bare.labels == ["person", "vehicle", "pet"]
     assert bare.detections == []
-    assert bare.snapshot_url == "/api/frigate_feed/media/review/100.0-group1/thumb.webp"
+    assert bare.snapshot_url == f"/api/frigate_feed/media/review/100.0-group1/thumb.webp?v={version}"
 
 
 async def test_review_to_item_robust_to_missing_keys(hass: HomeAssistant, source) -> None:
@@ -533,51 +540,6 @@ async def test_recently_ended_clip_stays_pending_until_ready(hass: HomeAssistant
     events = _events(fake_frigate)
     assert review_to_item(_just_ended(fake_frigate, 5), source, events).recording == {"status": "pending"}
     assert review_to_item(_just_ended(fake_frigate, 30), source, events).recording["status"] == "linked"
-
-
-async def test_clip_ready_announces_feed_update(hass: HomeAssistant, fake_frigate, source) -> None:
-    from homeassistant.helpers.dispatcher import async_dispatcher_connect
-
-    from custom_components.frigate_feed.const import SIGNAL_FEED_UPDATED
-
-    _just_ended(fake_frigate, 5)
-    received: list[dict[str, Any]] = []
-    async_dispatcher_connect(hass, SIGNAL_FEED_UPDATED, received.append)
-    manager = _manager(hass, source)
-    await manager.async_start()
-
-    items = await manager.async_list_items()
-    assert next(i for i in items if i.id == IN_PROGRESS_ID).recording == {"status": "pending"}
-    await manager.async_list_items()  # cached; must not schedule a second timer
-    assert len(manager._clip_ready_timers) == 1
-
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=30))
-    await hass.async_block_till_done()
-    assert received == [
-        {"type": "clip_ready", "review_id": IN_PROGRESS_ID, "camera": "front_door", "label": "person"}
-    ]
-    assert manager._clip_ready_timers == {}
-    _just_ended(fake_frigate, 60)  # HA timers moved on; move the event's real end time too
-    items = await manager.async_list_items()
-    assert next(i for i in items if i.id == IN_PROGRESS_ID).recording["status"] == "linked"
-    await manager.async_stop()
-
-
-async def test_stop_cancels_clip_ready_timers(hass: HomeAssistant, fake_frigate, source) -> None:
-    from homeassistant.helpers.dispatcher import async_dispatcher_connect
-
-    from custom_components.frigate_feed.const import SIGNAL_FEED_UPDATED
-
-    _just_ended(fake_frigate, 5)
-    received: list[dict[str, Any]] = []
-    async_dispatcher_connect(hass, SIGNAL_FEED_UPDATED, received.append)
-    manager = _manager(hass, source)
-    await manager.async_start()
-    await manager.async_list_items()
-    await manager.async_stop()
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=30))
-    await hass.async_block_till_done()
-    assert received == []
 
 
 async def test_review_to_item_snapshot_box(hass: HomeAssistant, source) -> None:

@@ -24,7 +24,6 @@ from homeassistant.const import CONF_ID, EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .const import (
     CARD_FILENAME,
@@ -41,13 +40,11 @@ from .const import (
     MAX_RETENTION_HOURS,
     MIN_MAX_DETECTIONS,
     MIN_RETENTION_HOURS,
-    SIGNAL_FEED_UPDATED,
     SUPPORTED_DETECTION_LABELS,
 )
 from .feed import FrigateFeedManager
 from .frigate_source import FrigateNotReady, FrigateSource, async_get_frigate_source
 from .media import async_register_media_views, sign_item_urls
-from .mqtt_listener import async_setup_mqtt_listener
 from .storage import HiddenStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,7 +58,6 @@ class FrigateFeedData:
 
     source: FrigateSource
     manager: FrigateFeedManager
-    mqtt_unsub: Callable[[], None] | None = None
     options_unsub: Callable[[], None] | None = None
 
 
@@ -90,12 +86,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: FrigateFeedConfigEntry) 
         _max_detections_from_entry(entry),
     )
     await manager.async_start()
-    mqtt_unsub = await async_setup_mqtt_listener(hass, source, manager)
     options_unsub = entry.add_update_listener(_async_reload_entry_on_update)
     entry.runtime_data = FrigateFeedData(
         source=source,
         manager=manager,
-        mqtt_unsub=mqtt_unsub,
         options_unsub=options_unsub,
     )
     async_register_media_views(hass, lambda: _current_source(hass))
@@ -110,8 +104,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: FrigateFeedConfigEntry)
     data = entry.runtime_data
     if data.options_unsub:
         data.options_unsub()
-    if data.mqtt_unsub:
-        data.mqtt_unsub()
     await data.manager.async_stop()
     return True
 
@@ -235,7 +227,6 @@ def _async_register_ws_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_list_items)
     websocket_api.async_register_command(hass, ws_resolve_recording)
     websocket_api.async_register_command(hass, ws_delete_item)
-    websocket_api.async_register_command(hass, ws_subscribe)
     hass.data[f"{DOMAIN}_ws_registered"] = True
 
 
@@ -332,23 +323,6 @@ async def ws_delete_item(
         return
 
     connection.send_result(msg["id"], {"ok": True})
-
-
-@websocket_api.websocket_command({"type": "frigate_feed/subscribe"})
-@callback
-def ws_subscribe(
-    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
-) -> None:
-    """Push a message whenever the feed changes (debounced MQTT updates)."""
-
-    @callback
-    def _forward(payload: dict) -> None:
-        connection.send_message(websocket_api.event_message(msg["id"], {"event": payload}))
-
-    connection.subscriptions[msg["id"]] = async_dispatcher_connect(
-        hass, SIGNAL_FEED_UPDATED, _forward
-    )
-    connection.send_result(msg["id"])
 
 
 def _enabled_labels_from_entry(entry: FrigateFeedConfigEntry) -> set[str]:

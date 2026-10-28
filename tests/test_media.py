@@ -22,6 +22,7 @@ from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
 from custom_components.frigate_feed import media
+from custom_components.frigate_feed.const import MEDIA_CACHE_CONTROL, SIGNED_URL_REUSE
 from custom_components.frigate_feed.media import (
     async_register_media_views,
     is_valid_event_id,
@@ -371,6 +372,65 @@ async def test_signed_urls_from_websocket_work_without_auth(
     # Tampering with the path or signed query invalidates the signature.
     tampered = result["recording"]["local_url"].replace("clip.mp4", "snapshot.jpg")
     assert (await client.get(tampered)).status == HTTPStatus.UNAUTHORIZED
+
+
+async def test_signed_urls_are_reused_per_refresh_token(
+    hass: HomeAssistant, holder: SourceHolder, hass_ws_client
+) -> None:
+    """The same path signs to the same URL (browser-cacheable) until SIGNED_URL_REUSE ends."""
+
+    @websocket_api.websocket_command({vol.Required("type"): "frigate_feed_test/sign"})
+    @websocket_api.async_response
+    async def ws_sign(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+        connection.send_result(msg["id"], sign_item_urls(hass, {"snapshot_url": SNAPSHOT_PATH}))
+
+    websocket_api.async_register_command(hass, ws_sign)
+    ws = await hass_ws_client(hass)
+
+    async def sign(msg_id: int) -> str:
+        await ws.send_json({"id": msg_id, "type": "frigate_feed_test/sign"})
+        return (await ws.receive_json())["result"]["snapshot_url"]
+
+    first = await sign(1)
+    with patch("custom_components.frigate_feed.media.time.time", return_value=time.time() + 60):
+        assert await sign(2) == first
+    later = time.time() + SIGNED_URL_REUSE.total_seconds() + 60
+    with (
+        patch("custom_components.frigate_feed.media.time.time", return_value=later),
+        patch("homeassistant.components.http.auth.time.time", return_value=later),
+    ):
+        renewed = await sign(3)
+    assert renewed != first
+    assert renewed.startswith(f"{SNAPSHOT_PATH}?authSig=")
+
+
+@pytest.mark.parametrize(
+    ("path", "upstream", "status", "cached"),
+    [
+        (f"{SNAPSHOT_PATH}?v=1793016160", UPSTREAM_SNAPSHOT, HTTPStatus.OK, True),
+        (f"{REVIEW_THUMB_PATH}?v=1793016160", UPSTREAM_REVIEW_THUMB, HTTPStatus.OK, True),
+        (SNAPSHOT_PATH, UPSTREAM_SNAPSHOT, HTTPStatus.OK, False),
+        (f"{SNAPSHOT_PATH}?v=1793016160", UPSTREAM_SNAPSHOT, HTTPStatus.NOT_MODIFIED, False),
+    ],
+)
+async def test_versioned_media_is_cacheable(
+    hass: HomeAssistant,
+    holder: SourceHolder,
+    hass_client,
+    aioclient_mock,
+    path: str,
+    upstream: str,
+    status: HTTPStatus,
+    cached: bool,
+) -> None:
+    """Only a 200 for the snapshot/thumbnail of an ended review item (`v=`) gets MEDIA_CACHE_CONTROL."""
+    body = b"img" if status == HTTPStatus.OK else None
+    aioclient_mock.get(upstream, status=status, content=body, headers={"Cache-Control": "no-store"})
+    client = await hass_client()
+    resp = await client.get(path)
+    assert resp.status == status
+    assert resp.headers["Cache-Control"] == (MEDIA_CACHE_CONTROL if cached else "no-store")
+    assert "v" not in aioclient_mock.mock_calls[-1][1].query
 
 
 async def test_conditional_headers_forwarded_and_304_passthrough(

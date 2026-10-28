@@ -1,7 +1,7 @@
 {
   "domain": "frigate_feed",
   "name": "Frigate Feed",
-  "after_dependencies": ["frigate", "lovelace", "mqtt"],
+  "after_dependencies": ["frigate", "lovelace"],
   "codeowners": [
     "@jefvlamings"
   ],
@@ -9,8 +9,8 @@
   "dependencies": ["http"],
   "documentation": "https://github.com/jefvlamings/frigate-feed",
   "integration_type": "service",
-  "iot_class": "local_push",
+  "iot_class": "local_polling",
   "issue_tracker": "https://github.com/jefvlamings/frigate-feed/issues",
   "requirements": [],
-  "version": "0.2.4"
+  "version": "0.3.0"
 }

@@ -14,7 +14,8 @@ history/logbook links, i18n, editor), but powered by Frigate:
   Frigate's own Review page; the dialog has a chip per detection that jumps to it in the clip
 - Frigate labels bucketed into `person`, `pet` (dog, cat, bird, ...) and `vehicle` (car, truck, bicycle, ...)
 - snapshot and clip for every item, proxied from Frigate through Home Assistant (no local copies)
-- live refresh when Frigate publishes `frigate/reviews` over MQTT
+- media URLs stay stable and finished items' snapshots/thumbnails are browser-cacheable;
+  the feed updates when the page is reloaded (no live refresh)
 - "delete" only hides an item in the feed; Frigate is never modified
 
 Architecture and decisions are documented in [`PLANS.md`](PLANS.md).
@@ -25,8 +26,6 @@ Architecture and decisions are documented in [`PLANS.md`](PLANS.md).
 - The official [Frigate integration](https://github.com/blakeblackshear/frigate-hass-integration)
   (`frigate` domain, tested with v5.15.6) set up and connected to your Frigate server.
   Frigate Feed reuses its client and authentication; it has no Frigate URL/credentials of its own.
-- The Home Assistant MQTT integration connected to the same broker as Frigate (for live refresh;
-  without it the card still works but only refreshes when reloaded).
 - Frigate with snapshots and recordings enabled (clips come from Frigate's recordings, so
   Frigate's own retention decides how long items stay available).
 
@@ -76,7 +75,6 @@ The card is also available in the card picker and has a visual editor.
 | `frigate_feed/list` | `labels` (optional list of buckets) | `{ items, enabled_labels, retention_hours }`, newest first |
 | `frigate_feed/resolve_recording` | `item_id`, `final_attempt` (optional bool) | the item's `recording` (`status`: `linked`, `pending`, `not_found`) |
 | `frigate_feed/delete_item` | `item_id` | hides the item (Frigate is not modified) |
-| `frigate_feed/subscribe` | none | subscription; emits an event whenever the feed changes (MQTT driven, debounced) |
 
 Items keep the reolink-feed shape (`id`, `start_ts`, `end_ts`, `duration_s`, `label`,
 `source_entity_id`, `camera_name`, `snapshot_url`, `recording`) plus:

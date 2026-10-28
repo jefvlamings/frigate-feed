@@ -103,12 +103,6 @@ class FrigateSource:
         """Frigate entry `validate_ssl` (default True)."""
         return bool(self._entry_data().get("validate_ssl", True))
 
-    @property
-    def topic_prefix(self) -> str:
-        """MQTT topic prefix from config["mqtt"]["topic_prefix"] (default "frigate")."""
-        prefix = _as_dict(self.config.get("mqtt")).get("topic_prefix")
-        return str(prefix) if prefix else "frigate"
-
     def auth_headers(self) -> dict[str, str]:
         """Headers that authenticate a request to Frigate (client.get_auth_headers())."""
         try:

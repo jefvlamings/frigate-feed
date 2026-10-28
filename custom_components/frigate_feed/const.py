@@ -28,14 +28,18 @@ EVENTS_QUERY_LIMIT = 1000
 
 CLEANUP_INTERVAL_SECONDS = 3600
 LIST_CACHE_SECONDS = 10
-MQTT_DEBOUNCE_SECONDS = 2.0
 DEFAULT_PRE_CAPTURE_SECONDS = 5
 # Frigate writes recording segments in ~10s chunks; an event clip returns HTTP 400 until
 # the segments covering end_time + post_capture exist.
 CLIP_READY_GRACE_SECONDS = 15
 SIGNED_URL_EXPIRY = timedelta(hours=24)
-
-SIGNAL_FEED_UPDATED = "frigate_feed_updated"
+# A signed media path is reused for this long, so list calls return the same URLs and
+# browsers can serve the media from their cache.
+SIGNED_URL_REUSE = timedelta(hours=12)
+# Snapshot/thumbnail URLs of ended review items carry the review end time in this query
+# parameter; their media no longer changes, so the proxy marks it cacheable.
+MEDIA_VERSION_PARAM = "v"
+MEDIA_CACHE_CONTROL = f"private, max-age={int(SIGNED_URL_EXPIRY.total_seconds())}, immutable"
 
 # Media proxy served by this integration; kinds are MEDIA_KINDS.
 MEDIA_URL = "/api/frigate_feed/media/{event_id}/{kind}"
