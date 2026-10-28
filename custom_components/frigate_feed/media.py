@@ -21,6 +21,7 @@ import aiohttp
 from aiohttp import hdrs, web
 from yarl import URL
 
+from homeassistant.components import websocket_api
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.auth import SAFE_QUERY_PARAMS, async_sign_path
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
@@ -30,13 +31,17 @@ from homeassistant.helpers.event import async_call_later
 
 from .const import (
     DOMAIN,
+    MEDIA_CACHE_CONTROL,
     MEDIA_KIND_CLIP,
     MEDIA_KIND_SNAPSHOT,
     MEDIA_KINDS,
     MEDIA_URL,
+    MEDIA_VERSION_PARAM,
+    REVIEW_MEDIA_KIND_THUMB,
     REVIEW_MEDIA_KINDS,
     REVIEW_MEDIA_URL,
     SIGNED_URL_EXPIRY,
+    SIGNED_URL_REUSE,
 )
 from .feed import clip_bounds
 from .frigate_source import FrigateSource
@@ -45,11 +50,14 @@ _LOGGER = logging.getLogger(__name__)
 
 DATA_MEDIA_VIEWS_REGISTERED = f"{DOMAIN}_media_views_registered"
 DATA_CLIP_CACHE = f"{DOMAIN}_clip_cache"
+DATA_SIGNED_PATHS = f"{DOMAIN}_signed_paths"
 MEDIA_PATH_PREFIX = "/api/frigate_feed/media/"
 
 EVENT_ID_RE = re.compile(r"^[0-9]+\.[0-9]+-[a-z0-9]+$", re.IGNORECASE)
 SNAPSHOT_QUERY_PARAMS: tuple[str, ...] = ("height", "quality", "crop", "bbox")
 _SAFE_PARAM_VALUE_RE = re.compile(r"^[0-9]{1,5}$")
+# Media of an ended review item never changes; see MEDIA_VERSION_PARAM.
+CACHEABLE_MEDIA_KINDS: frozenset[str] = frozenset((MEDIA_KIND_SNAPSHOT, REVIEW_MEDIA_KIND_THUMB))
 
 FORWARDED_REQUEST_HEADERS: tuple[str, ...] = (
     hdrs.RANGE,
@@ -110,7 +118,8 @@ def sign_item_urls(hass: HomeAssistant, item: dict[str, Any]) -> dict[str, Any]:
     """Return a copy of an item dict with snapshot_url, thumbnail_url and recording.local_url signed.
 
     Must be called while handling a websocket command so async_sign_path can bind
-    the signature to the current connection's refresh token. Uses SIGNED_URL_EXPIRY.
+    the signature to the current connection's refresh token. Uses SIGNED_URL_EXPIRY;
+    signatures are reused for SIGNED_URL_REUSE so the URLs stay browser-cacheable.
     """
     signed = dict(item)
     for key in ("snapshot_url", "thumbnail_url"):
@@ -139,14 +148,46 @@ def _sign_path(hass: HomeAssistant, path: str) -> str:
 
     async_sign_path leaves SAFE_QUERY_PARAMS (height, width) out of both the signature
     and the returned URL, since clients may change them; they are appended again.
+
+    Every signature differs (it holds its issue time), so the signed path of a
+    websocket connection's refresh token is kept and reused for SIGNED_URL_REUSE.
     """
+    connection = websocket_api.current_connection.get()
+    refresh_token_id = connection.refresh_token_id if connection else None
+    signed_paths: _SignedPathCache = hass.data.setdefault(DATA_SIGNED_PATHS, _SignedPathCache())
+    if refresh_token_id and (cached := signed_paths.get(refresh_token_id, path)) is not None:
+        return cached
     try:
-        signed = async_sign_path(hass, path, SIGNED_URL_EXPIRY)
+        signed = async_sign_path(hass, path, SIGNED_URL_EXPIRY, refresh_token_id=refresh_token_id)
     except KeyError:
         _LOGGER.debug("Cannot sign %s: HTTP auth not set up; returning unsigned path", path)
         return path
     safe = [(key, value) for key, value in URL(path).query.items() if key in SAFE_QUERY_PARAMS]
-    return f"{signed}&{urlencode(safe)}" if safe else signed
+    signed = f"{signed}&{urlencode(safe)}" if safe else signed
+    if refresh_token_id:
+        signed_paths.put(refresh_token_id, path, signed)
+    return signed
+
+
+class _SignedPathCache:
+    """Signed media paths by (refresh token id, path), each kept for SIGNED_URL_REUSE."""
+
+    def __init__(self) -> None:
+        self._items: dict[tuple[str, str], tuple[str, float]] = {}
+        self._next_prune = 0.0
+
+    def get(self, refresh_token_id: str, path: str) -> str | None:
+        entry = self._items.get((refresh_token_id, path))
+        if entry is None or entry[1] <= time.time():
+            return None
+        return entry[0]
+
+    def put(self, refresh_token_id: str, path: str, signed: str) -> None:
+        now = time.time()
+        if now >= self._next_prune:
+            self._items = {key: entry for key, entry in self._items.items() if entry[1] > now}
+            self._next_prune = now + SIGNED_URL_REUSE.total_seconds()
+        self._items[(refresh_token_id, path)] = (signed, now + SIGNED_URL_REUSE.total_seconds())
 
 
 def is_valid_event_id(event_id: str) -> bool:
@@ -330,6 +371,7 @@ class FrigateFeedMediaView(HomeAssistantView):
 
         upstream_url = f"{base_url.rstrip('/')}{upstream_path}"
         params = _snapshot_params(request) if kind == MEDIA_KIND_SNAPSHOT else {}
+        cacheable = kind in CACHEABLE_MEDIA_KINDS and MEDIA_VERSION_PARAM in request.query
         headers = dict(auth_headers)
         for name in FORWARDED_REQUEST_HEADERS:
             if (value := request.headers.get(name)) is not None:
@@ -343,7 +385,9 @@ class FrigateFeedMediaView(HomeAssistantView):
         if kind == MEDIA_KIND_CLIP and range_header:
             cache_key = f"{base_url}|{cache_id}"
             return await self._async_serve_clip_range(request, session, upstream_url, headers, cache_key)
-        return await self._async_proxy(request, session, upstream_url, params, headers)
+        return await self._async_proxy(
+            request, session, upstream_url, params, headers, MEDIA_CACHE_CONTROL if cacheable else None
+        )
 
     async def _async_proxy(
         self,
@@ -352,6 +396,7 @@ class FrigateFeedMediaView(HomeAssistantView):
         url: str,
         params: dict[str, str],
         headers: dict[str, str],
+        cache_control: str | None = None,
     ) -> web.StreamResponse:
         try:
             async with session.get(
@@ -359,7 +404,7 @@ class FrigateFeedMediaView(HomeAssistantView):
             ) as upstream:
                 if (error := _map_upstream_status(upstream.status, url)) is not None:
                     return error
-                return await _async_stream_upstream(request, upstream)
+                return await _async_stream_upstream(request, upstream, cache_control=cache_control)
         except (aiohttp.ClientError, TimeoutError) as err:
             _LOGGER.debug("Frigate media request %s failed: %s", url, err)
             return web.Response(status=HTTPStatus.BAD_GATEWAY)
@@ -490,10 +535,12 @@ async def _async_stream_upstream(
     upstream: aiohttp.ClientResponse,
     prefix: bytes = b"",
     content: aiohttp.StreamReader | None = None,
+    cache_control: str | None = None,
 ) -> web.StreamResponse:
     """Copy upstream status, relevant headers and body to the client.
 
     `prefix` holds body bytes already consumed from `content` (upstream.content).
+    `cache_control` replaces the upstream Cache-Control of a 200 response.
     """
     if content is None:
         content = upstream.content
@@ -501,6 +548,8 @@ async def _async_stream_upstream(
     for name in COPIED_RESPONSE_HEADERS:
         if (value := upstream.headers.get(name)) is not None:
             response.headers[name] = value
+    if cache_control is not None and upstream.status == HTTPStatus.OK:
+        response.headers[hdrs.CACHE_CONTROL] = cache_control
     if hdrs.CONTENT_ENCODING in upstream.headers:
         # The client session decompresses the body, so the upstream length is wrong.
         response.headers.pop(hdrs.CONTENT_LENGTH, None)

@@ -9,9 +9,8 @@ import math
 import time
 from typing import Any
 
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.event import async_call_later, async_track_time_interval
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -24,9 +23,9 @@ from .const import (
     MEDIA_KIND_CLIP,
     MEDIA_KIND_SNAPSHOT,
     MEDIA_URL,
+    MEDIA_VERSION_PARAM,
     REVIEW_MEDIA_KIND_THUMB,
     REVIEW_MEDIA_URL,
-    SIGNAL_FEED_UPDATED,
     THUMBNAIL_QUERY,
     bucket_frigate_label,
     frigate_labels_for_buckets,
@@ -166,6 +165,14 @@ def _best_event(events: list[dict[str, Any]], label: str) -> dict[str, Any] | No
     )
 
 
+def _versioned_media_url(path: str, end: float | None) -> str:
+    """Mark the media of an ended review item as final (MEDIA_VERSION_PARAM = its end time)."""
+    if end is None:
+        return path
+    separator = "&" if "?" in path else "?"
+    return f"{path}{separator}{MEDIA_VERSION_PARAM}={int(end)}"
+
+
 def review_to_item(
     review: dict[str, Any],
     source: FrigateSource,
@@ -238,13 +245,16 @@ def review_to_item(
         labels=labels,
         source_entity_id=source.source_entity_id(camera, raw_label.removesuffix("-verified")) or "",
         camera_name=source.camera_display_name(camera),
-        snapshot_url=(
+        snapshot_url=_versioned_media_url(
             MEDIA_URL.format(event_id=best["id"], kind=MEDIA_KIND_SNAPSHOT)
             if best
-            else REVIEW_MEDIA_URL.format(review_id=review_id, kind=REVIEW_MEDIA_KIND_THUMB)
+            else REVIEW_MEDIA_URL.format(review_id=review_id, kind=REVIEW_MEDIA_KIND_THUMB),
+            end,
         ),
         thumbnail_url=(
-            f"{MEDIA_URL.format(event_id=best['id'], kind=MEDIA_KIND_SNAPSHOT)}?{THUMBNAIL_QUERY}"
+            _versioned_media_url(
+                f"{MEDIA_URL.format(event_id=best['id'], kind=MEDIA_KIND_SNAPSHOT)}?{THUMBNAIL_QUERY}", end
+            )
             if best
             else None
         ),
@@ -288,8 +298,6 @@ class FrigateFeedManager:
         # (monotonic fetched_at, query limit, raw review items newest-first, events by id)
         self._cache: tuple[float, int, list[dict[str, Any]], dict[str, dict[str, Any]]] | None = None
         self._unsub_cleanup: Callable[[], None] | None = None
-        # review_id -> cancel callback of the timer that announces its clip is ready
-        self._clip_ready_timers: dict[str, Callable[[], None]] = {}
 
     async def async_start(self) -> None:
         """Load hidden ids and schedule the hourly hidden-id prune."""
@@ -305,9 +313,6 @@ class FrigateFeedManager:
         if self._unsub_cleanup is not None:
             self._unsub_cleanup()
             self._unsub_cleanup = None
-        for cancel in self._clip_ready_timers.values():
-            cancel()
-        self._clip_ready_timers.clear()
         self.invalidate_cache()
 
     def get_enabled_labels(self) -> set[str]:
@@ -341,7 +346,6 @@ class FrigateFeedManager:
             item = review_to_item(review, self.source, events, wanted)
             if item is None:
                 continue
-            self._schedule_clip_ready(review, item)
             items.append(item)
         items.sort(key=lambda item: item.start_dt, reverse=True)
         return items[:cap]
@@ -411,29 +415,6 @@ class FrigateFeedManager:
                     events[str(event["id"])] = event
         self._cache = (now, limit, reviews, events)
         return reviews, events
-
-    def _schedule_clip_ready(self, review: dict[str, Any], item: DetectionItem) -> None:
-        """Announce a feed update once an ended review item's recording becomes available."""
-        end = _as_float(review.get("end_time"))
-        if end is None or item.recording.get("status") != "pending":
-            return
-        if item.id in self._clip_ready_timers:
-            return
-        delay = max(clip_ready_at(review, self.source, end) - time.time(), 0.0) + 1.0
-        payload = {
-            "type": "clip_ready",
-            "review_id": item.id,
-            "camera": _review_camera(review),
-            "label": item.label,
-        }
-
-        @callback
-        def _announce(_now: datetime) -> None:
-            self._clip_ready_timers.pop(item.id, None)
-            self.invalidate_cache()
-            async_dispatcher_send(self.hass, SIGNAL_FEED_UPDATED, payload)
-
-        self._clip_ready_timers[item.id] = async_call_later(self.hass, delay, _announce)
 
     def _cached_review(self, review_id: str) -> dict[str, Any] | None:
         if self._cache is None:

@@ -86,7 +86,6 @@ custom_components/frigate_feed/
   config_flow.py     pick Frigate source + options (labels, cameras, retention, max detections)
   const.py           domain, defaults, label mapping tables
   frigate_source.py  NEW: read-only adapter over the Frigate integration (client, config, entities)
-  mqtt_listener.py   NEW: frigate/reviews -> debounced live-update signal
   feed.py            NEW (much smaller than reolink's 2100 lines): FrigateFeedManager
   media.py           NEW: authenticated HA proxy view for snapshot/clip + URL signing
   models.py          DetectionItem (copied, + optional `frigate` dict)
@@ -115,6 +114,9 @@ write our own Frigate HTTP client or auth: the integration stores per config ent
 Single instance (like reolink-feed).
 
 ### Ingestion: pull + MQTT push for live refresh
+> v0.3.0: live refresh (MQTT listener, `frigate_feed/subscribe`) was removed; the feed
+> updates on page reload and media URLs stay stable so browsers can cache them.
+
 - **Pull**: `frigate_feed/list` calls `GET /api/events?after=<now - retention>&limit=<max>&labels=...`
   with a short in-memory cache (~5–10s) so multiple cards/browsers don't hammer Frigate.
   No local item store needed → nothing to migrate, rebuild is trivial.
@@ -234,7 +236,7 @@ Camera filtering stays as the card's existing `cameras:` YAML option (no backend
 | Delete | Hide only; never modifies Frigate |
 | Labels | Bucket into person/pet/vehicle; drop motion/visitor; raw label kept in `item.frigate` |
 | Connection | Required official Frigate integration; reuse its client/auth and cached config |
-| Live refresh | MQTT `frigate/reviews` → dispatcher → `frigate_feed/subscribe` WS subscription |
+| Live refresh | Removed in v0.3.0: reload the page; signed media URLs are reused (12h) and finished items' snapshots/thumbnails are served `immutable` |
 | Dev env | Local Frigate + fake cameras + mosquitto in docker-compose |
 | Packaging | Separate HACS repo `jefvlamings/frigate-feed`, starting v0.1.0 |
 | Card | One-time fork of reolink-feed card; free to diverge afterwards |

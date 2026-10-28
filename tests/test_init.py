@@ -11,12 +11,10 @@ from yarl import URL
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from custom_components.frigate_feed.const import (
     CONF_FRIGATE_ENTRY_ID,
     DOMAIN,
-    SIGNAL_FEED_UPDATED,
 )
 
 from .conftest import FRIGATE_URL, FakeFrigate
@@ -91,11 +89,18 @@ async def test_list_resolve_delete_and_media(
     assert [detection["event_id"] for detection in ended["detections"]] == [event_id]
     snapshot_url = ended["snapshot_url"]
     clip_url = ended["recording"]["local_url"]
-    assert snapshot_url.startswith(f"/api/frigate_feed/media/{event_id}/snapshot.jpg?authSig=")
+    assert snapshot_url.startswith(f"/api/frigate_feed/media/{event_id}/snapshot.jpg?v=")
+    assert "authSig=" in snapshot_url
     assert clip_url.startswith(f"/api/frigate_feed/media/review/{ended['id']}/clip.mp4?authSig=")
 
     in_progress = next(item for item in items if item["id"] == "1793016151.200000-rev001")
     assert in_progress["recording"] == {"status": "pending"}
+
+    # Signed URLs are reused, so browsers can serve the media from their cache.
+    msg = await _ws(client, {"type": "frigate_feed/list"})
+    again = next(item for item in msg["result"]["items"] if item["id"] == ended["id"])
+    assert again["snapshot_url"] == snapshot_url
+    assert again["thumbnail_url"] == ended["thumbnail_url"]
 
     msg = await _ws(
         client, {"type": "frigate_feed/resolve_recording", "item_id": ended["id"]}
@@ -119,6 +124,7 @@ async def test_list_resolve_delete_and_media(
     assert resp.status == 200
     assert await resp.read() == b"jpeg-bytes"
     assert resp.headers["Content-Type"].startswith("image/jpeg")
+    assert resp.headers["Cache-Control"] == "private, max-age=86400, immutable"
     unsigned = await http.get(snapshot_url.split("?", 1)[0])
     assert unsigned.status == 401
 
@@ -160,24 +166,6 @@ async def test_list_resolve_delete_and_media(
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.NOT_LOADED
-
-
-async def test_subscribe_forwards_feed_updates(
-    hass: HomeAssistant, fake_frigate: FakeFrigate, hass_ws_client
-) -> None:
-    await _setup_feed(hass, fake_frigate)
-    client = await hass_ws_client(hass)
-
-    msg = await _ws(client, {"type": "frigate_feed/subscribe"})
-    assert msg["success"], msg
-    sub_id = msg["id"]
-
-    payload = {"type": "end", "review_id": "1.0-abc", "camera": "front_door", "label": "person"}
-    async_dispatcher_send(hass, SIGNAL_FEED_UPDATED, payload)
-    event = await client.receive_json()
-    assert event["id"] == sub_id
-    assert event["type"] == "event"
-    assert event["event"] == {"event": payload}
 
 
 async def test_list_reports_frigate_unavailable(

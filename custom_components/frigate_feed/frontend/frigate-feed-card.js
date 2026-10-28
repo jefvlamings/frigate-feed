@@ -6,7 +6,6 @@ function normalizeCardLabel(label) {
   return LEGACY_CARD_LABEL_ALIASES[lowered] || lowered;
 }
 
-const LIVE_REFRESH_DEBOUNCE_MS = 500;
 const MEDIA_ERROR_REFRESH_MIN_INTERVAL_MS = 60 * 1000;
 
 function slugifyCardValue(value) {
@@ -165,11 +164,7 @@ class FrigateFeedCard extends HTMLElement {
     this._videoControlsEnabled = new Set();
     this._ignoreDialogCloseEvents = 0;
     this._hasLoaded = false;
-    this._isConnected = false;
-    this._wasDisconnected = false;
-    this._subscription = null;
-    this._liveRefreshTimer = null;
-    this._liveRefreshQueued = false;
+    this._silentRefreshQueued = false;
     this._lastMediaErrorRefreshTs = 0;
     this._lastLoadErrorTs = 0;
     this._handleMediaError = (ev) => {
@@ -205,88 +200,13 @@ class FrigateFeedCard extends HTMLElement {
   }
 
   connectedCallback() {
-    this._isConnected = true;
     this._thumbResizeObserver?.observe(this);
     if (this._infoDialog.open) window.addEventListener("keydown", this._handleDialogKeyDown);
-    this._ensureLiveSubscription();
-    if (this._wasDisconnected) {
-      this._wasDisconnected = false;
-      // Events may have been missed while detached (e.g. switching dashboard views).
-      if (this._hasLoaded) this._scheduleLiveRefresh();
-    }
   }
 
   disconnectedCallback() {
-    this._isConnected = false;
     this._thumbResizeObserver?.disconnect();
-    this._wasDisconnected = true;
     window.removeEventListener("keydown", this._handleDialogKeyDown);
-    if (this._liveRefreshTimer) {
-      clearTimeout(this._liveRefreshTimer);
-      this._liveRefreshTimer = null;
-    }
-    this._teardownLiveSubscription();
-  }
-
-  _ensureLiveSubscription() {
-    const connection = this._hass?.connection;
-    if (!this._isConnected || !connection || typeof connection.subscribeMessage !== "function") return;
-    if (this._subscription?.connection === connection) return;
-    this._teardownLiveSubscription();
-    const subscription = { connection, unsubscribe: null, cancelled: false, onReady: null };
-    this._subscription = subscription;
-    // The websocket library resubscribes after a reconnect; reload to catch missed events.
-    subscription.onReady = () => this._scheduleLiveRefresh();
-    connection.addEventListener?.("ready", subscription.onReady);
-    const onMessage = () => this._scheduleLiveRefresh();
-    let pending;
-    try {
-      pending = Promise.resolve(
-        connection.subscribeMessage(onMessage, { type: "frigate_feed/subscribe" }),
-      );
-    } catch (err) {
-      pending = Promise.reject(err);
-    }
-    pending
-      .then((unsubscribe) => {
-        if (subscription.cancelled) {
-          this._callUnsubscribe(unsubscribe);
-          return;
-        }
-        subscription.unsubscribe = unsubscribe;
-      })
-      .catch(() => {
-        // Live refresh unavailable (older backend or no permission); manual refresh still works.
-      });
-  }
-
-  _teardownLiveSubscription() {
-    const subscription = this._subscription;
-    if (!subscription) return;
-    this._subscription = null;
-    subscription.cancelled = true;
-    if (subscription.onReady) {
-      subscription.connection.removeEventListener?.("ready", subscription.onReady);
-    }
-    this._callUnsubscribe(subscription.unsubscribe);
-  }
-
-  _callUnsubscribe(unsubscribe) {
-    if (typeof unsubscribe !== "function") return;
-    try {
-      const result = unsubscribe();
-      if (result && typeof result.catch === "function") result.catch(() => {});
-    } catch (_err) {
-      // Connection may already be closed.
-    }
-  }
-
-  _scheduleLiveRefresh() {
-    if (this._liveRefreshTimer) clearTimeout(this._liveRefreshTimer);
-    this._liveRefreshTimer = setTimeout(() => {
-      this._liveRefreshTimer = null;
-      this._loadItems({ silent: true });
-    }, LIVE_REFRESH_DEBOUNCE_MS);
   }
 
   setConfig(config) {
@@ -327,7 +247,6 @@ class FrigateFeedCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    this._ensureLiveSubscription();
     // Retry a failed initial load on later hass updates, but not on every state change.
     const retryBlocked = Date.now() - this._lastLoadErrorTs < 30 * 1000;
     if (!this._hasLoaded && !this._loading && !retryBlocked) {
@@ -415,13 +334,13 @@ class FrigateFeedCard extends HTMLElement {
     if (!this._hass || !this._config) {
       return;
     }
-    // Silent loads (live refresh, expired URLs) keep page, filters, expanded cluster and dialog.
+    // Silent loads (expired media URLs) keep page, filters, expanded cluster and dialog.
     const silent = Boolean(options.silent);
     if (silent) {
       if (this._loading) {
-        this._liveRefreshQueued = true;
-        this._liveRefreshNeedsDialogMedia =
-          Boolean(this._liveRefreshNeedsDialogMedia) || Boolean(options.refreshDialogMedia);
+        this._silentRefreshQueued = true;
+        this._silentRefreshNeedsDialogMedia =
+          Boolean(this._silentRefreshNeedsDialogMedia) || Boolean(options.refreshDialogMedia);
         return;
       }
       return this._loadItemsSilently(Boolean(options.refreshDialogMedia));
@@ -440,7 +359,7 @@ class FrigateFeedCard extends HTMLElement {
     } finally {
       this._loading = false;
       this._render();
-      this._runQueuedLiveRefresh();
+      this._runQueuedSilentRefresh();
     }
   }
 
@@ -476,17 +395,17 @@ class FrigateFeedCard extends HTMLElement {
     this._hasLoaded = true;
   }
 
-  _runQueuedLiveRefresh() {
-    if (!this._liveRefreshQueued) return;
-    const refreshDialogMedia = Boolean(this._liveRefreshNeedsDialogMedia);
-    this._liveRefreshQueued = false;
-    this._liveRefreshNeedsDialogMedia = false;
+  _runQueuedSilentRefresh() {
+    if (!this._silentRefreshQueued) return;
+    const refreshDialogMedia = Boolean(this._silentRefreshNeedsDialogMedia);
+    this._silentRefreshQueued = false;
+    this._silentRefreshNeedsDialogMedia = false;
     this._loadItems({ silent: true, refreshDialogMedia });
   }
 
   _infoMediaKey(item) {
     if (!item) return "";
-    // Ignore query strings: signed URLs change on every list call for the same media.
+    // Ignore query strings: signed URLs are renewed for the same media.
     return [
       item.recording?.status || "",
       stripUrlQuery(item.recording?.local_url),
@@ -504,9 +423,9 @@ class FrigateFeedCard extends HTMLElement {
         type: "frigate_feed/list",
       });
     } catch (_err) {
-      // Keep the current list on transient errors; the next update or manual refresh retries.
+      // Keep the current list on transient errors; a page refresh retries.
       this._loading = false;
-      this._runQueuedLiveRefresh();
+      this._runQueuedSilentRefresh();
       return;
     }
     this._loading = false;
@@ -527,7 +446,7 @@ class FrigateFeedCard extends HTMLElement {
       }
       // The list behind the modal dialog is re-rendered when the dialog closes.
     }
-    this._runQueuedLiveRefresh();
+    this._runQueuedSilentRefresh();
   }
 
   async _refreshRecording(item, showToast = true, showSpinner = true, finalAttempt = false) {
@@ -1250,7 +1169,7 @@ class FrigateFeedCard extends HTMLElement {
         return buckets;
       })();
       if (this._expandedClusterKey) {
-        // Keep an expanded cluster open when a live refresh adds/removes items in it.
+        // Keep an expanded cluster open when a silent reload adds/removes items in it.
         const clusterKeyOf = (cluster) =>
           [...cluster.items]
             .sort((a, b) => new Date(b.start_ts).getTime() - new Date(a.start_ts).getTime())
