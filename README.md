@@ -58,9 +58,23 @@ show_timeline: true
 thumbnail: object
 ```
 
+To show only person detections initially while keeping all three filters available:
+
+```yaml
+type: custom:frigate-feed-card
+enabled_labels:
+  - person
+  - pet
+  - vehicle
+visible_labels:
+  - person
+```
+
 | Option | Default | Description |
 |---|---|---|
-| `labels` | all enabled labels | Label buckets to show (`person`, `pet`, `vehicle`). |
+| `enabled_labels` | all supported labels | Label buckets with a filter and detections (`person`, `pet` for animals, `vehicle`). |
+| `visible_labels` | all enabled labels | Enabled label buckets selected when the card first loads. A bucket can be enabled but omitted here to keep its filter visible and initially off. |
+| `labels` | legacy option | Label buckets selected when the card first loads. Used only when `visible_labels` is not set. |
 | `cameras` | all cameras | Only show detections from these cameras. |
 | `page_size` | `20` | Items per page. |
 | `show_timeline` | `true` | Show the timeline header with clustered detections. |

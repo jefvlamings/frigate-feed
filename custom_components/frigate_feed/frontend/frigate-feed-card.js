@@ -54,6 +54,9 @@ const CARD_I18N = {
   en: {
     person: "Person",
     pet: "Pet",
+    animal: "Animal",
+    enable: "Enable",
+    visible: "Visible",
     vehicle: "Vehicle",
     motion: "Motion",
     visitor: "Visitor",
@@ -99,6 +102,9 @@ const CARD_I18N = {
   nl: {
     person: "Persoon",
     pet: "Huisdier",
+    animal: "Dier",
+    enable: "Inschakelen",
+    visible: "Zichtbaar",
     vehicle: "Voertuig",
     motion: "Beweging",
     visitor: "Bezoeker",
@@ -157,6 +163,8 @@ class FrigateFeedCard extends HTMLElement {
     this._availableLabels = [...SUPPORTED_CARD_LABELS];
     this._activeLabels = new Set();
     this._configuredLabels = [];
+    this._configuredEnabledLabels = [...SUPPORTED_CARD_LABELS];
+    this._hasConfiguredVisibleLabels = false;
     this._filtersInitialized = false;
     this._retentionHours = 24;
     this._expandedClusterKey = "";
@@ -218,18 +226,25 @@ class FrigateFeedCard extends HTMLElement {
       thumbnail: "object",
       ...config,
     };
-    const rawLabels = Array.isArray(this._config.labels)
-      ? this._config.labels.map((label) => String(label || "").toLowerCase().trim())
-      : [];
-    const configuredLabels = [
+    const normalizeList = (labels) => [
       ...new Set(
-        rawLabels
+        (Array.isArray(labels) ? labels : [])
+          .map((label) => String(label || "").toLowerCase().trim())
           .map((label) => normalizeCardLabel(label))
           .filter((label) => SUPPORTED_CARD_LABELS.includes(label)),
       ),
     ];
-    this._configuredLabels = configuredLabels;
-    this._activeLabels = new Set(configuredLabels);
+    const configuredEnabled = this._config.enabled_labels === undefined
+      ? [...SUPPORTED_CARD_LABELS]
+      : normalizeList(this._config.enabled_labels);
+    const legacyVisible = normalizeList(this._config.labels);
+    const configuredVisible = this._config.visible_labels !== undefined
+      ? normalizeList(this._config.visible_labels)
+      : legacyVisible.length ? legacyVisible : configuredEnabled;
+    this._configuredEnabledLabels = configuredEnabled;
+    this._hasConfiguredVisibleLabels = this._config.visible_labels !== undefined || legacyVisible.length > 0;
+    this._configuredLabels = configuredVisible.filter((label) => configuredEnabled.includes(label));
+    this._activeLabels = new Set(this._configuredLabels);
     this._filtersInitialized = false;
     this._render();
     this._loadItems();
@@ -369,10 +384,10 @@ class FrigateFeedCard extends HTMLElement {
           .map((label) => normalizeCardLabel(label))
           .filter((label) => SUPPORTED_CARD_LABELS.includes(label))
       : [...SUPPORTED_CARD_LABELS];
-    this._availableLabels = [...new Set(enabledLabels)];
+    this._availableLabels = [...new Set(enabledLabels)].filter((label) => this._configuredEnabledLabels.includes(label));
     if (!this._filtersInitialized) {
       const initial =
-        this._configuredLabels.length > 0
+        this._hasConfiguredVisibleLabels
           ? this._configuredLabels.filter((label) => this._availableLabels.includes(label))
           : [...this._availableLabels];
       this._activeLabels = new Set(initial);
@@ -1784,12 +1799,29 @@ class FrigateFeedCardEditor extends HTMLElement {
     const pageSize = Number(this._config?.page_size ?? 20);
     const showTimeline = this._config?.show_timeline !== false;
     const thumbnail = this._config?.thumbnail === "frame" ? "frame" : "object";
+    const normalizeList = (labels) => [...new Set((Array.isArray(labels) ? labels : [])
+      .map((label) => normalizeCardLabel(label)).filter((label) => SUPPORTED_CARD_LABELS.includes(label)))];
+    const enabled = this._config.enabled_labels === undefined
+      ? [...SUPPORTED_CARD_LABELS]
+      : normalizeList(this._config.enabled_labels);
+    const legacyVisible = normalizeList(this._config.labels);
+    const visible = this._config.visible_labels !== undefined
+      ? normalizeList(this._config.visible_labels)
+      : legacyVisible.length ? legacyVisible : enabled;
+    const detectionRows = ["person", "pet", "vehicle"].map((label) => `
+      <div class="detection-row">
+        <span>${this._t(label === "pet" ? "animal" : label)}</span>
+        <label><input type="checkbox" data-setting="enabled_labels" data-label="${label}" aria-label="${this._t(label === "pet" ? "animal" : label)}: ${this._t("enable")}" ${enabled.includes(label) ? "checked" : ""}> ${this._t("enable")}</label>
+        <label><input type="checkbox" data-setting="visible_labels" data-label="${label}" aria-label="${this._t(label === "pet" ? "animal" : label)}: ${this._t("visible")}" ${visible.includes(label) ? "checked" : ""} ${enabled.includes(label) ? "" : "disabled"}> ${this._t("visible")}</label>
+      </div>`).join("");
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
         .grid { display: grid; gap: 10px; }
         .field { display: grid; gap: 4px; }
         .field.toggle { display: flex; align-items: center; justify-content: space-between; }
+        .detection-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 16px; color: var(--primary-text-color); font-size: 13px; }
+        .detection-row label { display: inline-flex; align-items: center; gap: 5px; }
         label { color: var(--primary-text-color); font-size: 13px; }
         input[type="text"], input[type="number"], select {
           border: 1px solid var(--divider-color);
@@ -1801,6 +1833,7 @@ class FrigateFeedCardEditor extends HTMLElement {
         }
       </style>
       <div class="grid">
+        ${detectionRows}
         <div class="field">
           <label for="page_size">${this._t("page_size")}</label>
           <input id="page_size" type="number" min="1" max="100" value="${pageSize}" />
@@ -1827,6 +1860,31 @@ class FrigateFeedCardEditor extends HTMLElement {
     });
     this.shadowRoot.querySelector("#thumbnail")?.addEventListener("change", (ev) => {
       this._emitConfig({ ...this._config, thumbnail: ev.target.value === "frame" ? "frame" : "object" });
+    });
+    this.shadowRoot.querySelectorAll("input[data-setting]").forEach((input) => {
+      input.addEventListener("change", (ev) => {
+        const label = ev.target.dataset.label;
+        const key = ev.target.dataset.setting;
+        const enabledLabels = key === "enabled_labels" ? enabled : [...enabled];
+        const visibleLabels = key === "visible_labels" ? visible : [...visible];
+        if (key === "enabled_labels") {
+          if (ev.target.checked) enabledLabels.push(label);
+          else {
+            const index = enabledLabels.indexOf(label);
+            if (index >= 0) enabledLabels.splice(index, 1);
+            const visibleIndex = visibleLabels.indexOf(label);
+            if (visibleIndex >= 0) visibleLabels.splice(visibleIndex, 1);
+          }
+        } else {
+          if (ev.target.checked) visibleLabels.push(label);
+          else {
+            const index = visibleLabels.indexOf(label);
+            if (index >= 0) visibleLabels.splice(index, 1);
+          }
+        }
+        this._emitConfig({ ...this._config, enabled_labels: [...new Set(enabledLabels)], visible_labels: [...new Set(visibleLabels)] });
+        this._render();
+      });
     });
   }
 }
